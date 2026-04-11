@@ -1,0 +1,17 @@
+# Standard Stable Windows ML Requirements for RVC (No-Fairseq)
+transformers
+librosa
+scipy
+soundfile
+numpy==1.23.5
+pydub
+faiss-cpu
+tqdm
+fsspec
+pyworld
+praat-parselmouth
+ffmpeg-python
+loguru
+cython
+setuptools
+wheel
