@@ -1,0 +1,12 @@
+# VoiceTTSr GUI Dependencies
+pydub==0.25.1
+pygame==2.6.1
+numpy==1.23.5
+requests==2.32.3
+tqdm==4.66.4
+
+# BERT Auto-Director & Qwen Orchestration
+transformers==4.37.2
+torch --index-url https://download.pytorch.org/whl/cpu
+soundfile
+accelerate
