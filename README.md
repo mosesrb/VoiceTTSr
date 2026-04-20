@@ -8,8 +8,7 @@
 Input: "Welcome to the system."
 
 Output:
-![VoiceTTSr Demo](docs/assets/demo.gif)
-*(Add audio sample or GIF)*
+![VoiceTTSr Demo](docs/assets/demo.png)
 
 ## ⚡ Quick Start
 
