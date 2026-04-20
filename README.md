@@ -5,9 +5,7 @@
 🚀 A local, GUI-based voice generation system supporting XTTS, RVC, and style-controlled speech synthesis. Turn text into expressive speech using your own voice models — fully offline.
 
 ## 🎬 Demo
-Input: "Welcome to the system."
 
-Output:
 ![VoiceTTSr Demo](docs/assets/demo.png)
 
 ## ⚡ Quick Start
