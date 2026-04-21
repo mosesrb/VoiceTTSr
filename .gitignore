@@ -50,3 +50,8 @@ icon.png
 create_shortcut.ps1
 .temp_ag_kit/
 .agent/
+
+# Agent Protocol Files
+CLAUDE.md
+MEMORIES.md
+KNOWLEDGE.md
