@@ -10,7 +10,7 @@ Whether you're generating thousands of lines for a Skyrim mod or crafting a cust
 
 ## 🎬 How it Looks
 
-![VoiceTTSr Interface](docs/assets/demo.png)
+![VoiceTTSr Interface](docs/assets/voicettr.png)
 
 ## ⚡ The Quick Start
 
@@ -32,6 +32,16 @@ Dependency conflicts are the death of local AI. VoiceTTSr uses a **Modular Worke
 - Each engine (XTTS, Qwen, Chatterbox, RVC) operates in its own isolated Conda environment.
 - Communication happens over a structured JSON protocol via subprocess pipes.
 - This ensures that updating one model never breaks the others.
+
+```mermaid
+graph TD;
+    GUI[Unified GUI Controller] --> Master[Process Orchestrator];
+    Master --> XW[XTTS Worker];
+    Master --> QW[Qwen Worker];
+    Master --> CW[Chatterbox Worker];
+    Master --> RW[RVC Enhancement];
+    XW & QW & CW & RW --> Out[High-Quality WAV];
+```
 
 ### 🎭 Emotional Acting (Qwen3-TTS)
 Unlike standard TTS that sounds "robotic," our Qwen integration supports native emotional tagging. You can force the model into *Seductive*, *Aggressive*, or *Warm* tones without complex prompt engineering.
