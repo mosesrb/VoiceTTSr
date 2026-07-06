@@ -95,6 +95,21 @@ class _FairsegHubertDirect(nn.Module):
         self.device = torch.device(device)
 
         log("Loading fairseq Hubert checkpoint weights…")
+        # Deliberately NOT forcing weights_only=False here. hubert_base.pt's
+        # pickle stream references fairseq.data.dictionary.Dictionary, which
+        # isn't in PyTorch's default safe-globals list, so on PyTorch >=2.6
+        # this will raise a clear "Unsupported global" error rather than
+        # silently deserializing an unreviewed third-party class -- that's
+        # the correct, safer failure mode for a downloaded checkpoint we
+        # can't fully verify from this codebase alone. The actual integrity
+        # control for this specific file is the SHA-256 check now performed
+        # in download_resources.py before it ever reaches this loader.
+        # If you hit "Unsupported global: GLOBAL fairseq.data.dictionary.
+        # Dictionary" and have confirmed the file's hash matches the pinned
+        # value in download_resources.py, you can allowlist it narrowly:
+        #   from fairseq.data.dictionary import Dictionary
+        #   torch.serialization.add_safe_globals([Dictionary])
+        # Do not reach for weights_only=False as a first response.
         ckpt = torch.load(ckpt_path, map_location="cpu")
 
         # fairseq saves model state under different keys depending on version
@@ -248,6 +263,12 @@ class RvcEngine:
         log(f"RVC engine ready ({self.device.upper()}).", "ok")
 
     def _get_rvc(self, model_pth: str, index_pth=None):
+        # rvc-python is installed with --no-deps (see setup_rvc_env.bat) so
+        # its own pinned versions don't clobber this env's torch/numpy/
+        # fairseq. That means pip will warn about rvc-python's declared
+        # fastapi/pydantic/uvicorn deps being "not installed" -- those are
+        # only used by rvc_python.api (its optional REST server), not by
+        # rvc_python.infer, which is the only submodule used here.
         from rvc_python.infer import RVCInference
         if self._rvc is None or self._loaded_model != model_pth:
             self._rvc = RVCInference(device=self.device)

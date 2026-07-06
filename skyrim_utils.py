@@ -28,7 +28,20 @@ class SkyrimConverter:
         """Call FaceFXWrapper to generate .lip sync data."""
         if not os.path.exists(self.facefx_exe):
             raise FileNotFoundError(f"FaceFXWrapper not found at {self.facefx_exe}")
-        
+
+        if not os.path.exists(self.fonix_data):
+            raise FileNotFoundError(
+                f"FonixData.cdf not found at {self.fonix_data}. This project does not "
+                "bundle FonixData.cdf, because it's Bethesda's proprietary data and "
+                "FaceFXWrapper's own documentation says it must not be redistributed "
+                "-- it has to come from your own legally-owned Bethesda Creation Kit "
+                "install (Data/Sound/Voice/Processing/FonixData.cdf), or the SSE "
+                "Creation Kit Fonixdata Lip Sync Fix on Nexus Mods if the Creation Kit "
+                "didn't install it for you. Copy it into tools/ (or point the Fonix "
+                "path at wherever you placed it) and try again. See "
+                "docs/THIRD_PARTY_NOTICES.md for details."
+            )
+
         # FaceFXWrapper [Type] [Lang] [FonixDataPath] [WavPath] [LipPath] [Text]
         # We use the 'Skip Resample' mode by providing a pre-processed 16kHz or 44kHz wav
         # Note: FaceFX often prefers 16kHz internally, but the wrapper handles it.
@@ -119,11 +132,14 @@ class SkyrimConverter:
             self.pack_fuz(temp_lip, temp_xwm, final_fuz_path)
             
         finally:
-            # Robust Cleanup
+            # Best-effort temp file cleanup -- a leftover temp file from a
+            # failed run is harmless, so a delete failure here (already
+            # removed, still locked by another process, etc.) is fine to
+            # ignore. Narrowed to OSError so unrelated bugs still surface.
             for f in [temp_wav, temp_lip, temp_xwm]:
                 if os.path.exists(f):
                     try: os.remove(f)
-                    except: pass
+                    except OSError: pass
 
         return final_fuz_path
 

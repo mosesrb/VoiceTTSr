@@ -87,14 +87,22 @@ def main():
 
     try:
         import torch
-        
-        # Patch torch.load to bypass PyTorch 2.6 weights_only=True default
-        # which blocks older TTS pipelines from unpickling configuration objects.
-        _orig_load = getattr(torch, "load")
-        def _patched_load(*args, **kwargs):
-            kwargs["weights_only"] = False
-            return _orig_load(*args, **kwargs)
-        setattr(torch, "load", _patched_load)
+
+        # NOTE: this worker previously force-set weights_only=False globally
+        # for every torch.load call in the process (a leftover copied from
+        # the XTTS worker's fix for a different, verified issue). That's
+        # broader than needed here: Qwen3TTSModel.from_pretrained() loads
+        # through Hugging Face Transformers, which already handles
+        # safetensors/weights_only loading correctly on its own, and this
+        # worker's own profile save/load below (`avg_emb`) is a plain tensor,
+        # which loads fine under PyTorch's safe default. The blanket bypass
+        # was removed rather than carried forward without a verified reason.
+        #
+        # If loading ever raises a "Weights only load failed" /
+        # "Unsupported global: GLOBAL <name>" error in practice, the fix is
+        # to allowlist that *specific* class via
+        # torch.serialization.add_safe_globals([<the named class>]) -- not
+        # to reinstate a global weights_only=False bypass.
 
         import soundfile as sf
         import numpy as np

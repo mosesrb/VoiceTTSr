@@ -157,6 +157,22 @@ for raw in sys.stdin:
         try:
             if not os.path.isfile(profile_path):
                 raise FileNotFoundError(f"Profile not found: {profile_path}")
+            # weights_only=False is kept here (unlike xtts_worker.py/
+            # qwen_worker.py, where it was narrowed or removed): the "cond"
+            # value saved below is a chatterbox-tts "Conditionals"-style
+            # object, not a plain tensor/dict, and this codebase can't
+            # confirm the exact class/fields without a live GPU install to
+            # test against -- guessing a torch.serialization.add_safe_globals
+            # allowlist here risks being silently wrong. Residual risk is
+            # lower than the XTTS/RVC downloaded-checkpoint case because
+            # these .pt profile files are created by this app itself, but
+            # they can still be shared between users like any save file.
+            # TODO(maintainer, verified on a real install): confirm the
+            # actual return type of MODEL.get_conditioning(), then either
+            # (a) allowlist that specific class, or (b) change save_profile
+            # to serialize cond's fields as a plain dict of tensors (as
+            # resemble-ai/chatterbox's own Conditionals.load() does), which
+            # would make weights_only=True work here with no allowlist.
             data = torch.load(profile_path, map_location=DEVICE, weights_only=False)
             if data.get("version", 0) >= 1:
                 _cached_cond     = data["cond"]
@@ -197,6 +213,8 @@ for raw in sys.stdin:
 
             if profile_path and os.path.isfile(profile_path):
                 try:
+                    # See the "load_profile" action above for why
+                    # weights_only=False is still used here.
                     data = torch.load(profile_path, map_location=DEVICE, weights_only=False)
                     if data.get("version", 0) >= 1:
                         use_cond = data["cond"]

@@ -106,14 +106,23 @@ def main():
     log("XTTS v2 worker starting…")
     try:
         import torch
-        
-        # Patch torch.load to bypass PyTorch 2.6 weights_only=True default
-        # which blocks older TTS pipelines from unpickling configuration objects.
-        _orig_load = getattr(torch, "load")
-        def _patched_load(*args, **kwargs):
-            kwargs["weights_only"] = False
-            return _orig_load(*args, **kwargs)
-        setattr(torch, "load", _patched_load)
+
+        # PyTorch 2.6 defaults torch.load to weights_only=True, which blocks
+        # XTTS's checkpoint loading because it needs to unpickle a handful of
+        # its own config dataclasses (not arbitrary code). Rather than
+        # bypassing weights_only entirely for every torch.load call in this
+        # process (which would also silently accept malicious pickles from
+        # anywhere), we explicitly allowlist only the specific TTS config
+        # classes XTTS is documented to require. This is the fix recommended
+        # by Coqui/PyTorch upstream for exactly this error. If a future TTS
+        # version needs another class, torch.load will raise a clear
+        # "Unsupported global: GLOBAL <name>" error naming it -- add that
+        # class here rather than reintroducing weights_only=False globally.
+        from TTS.config.shared_configs import BaseDatasetConfig
+        from TTS.tts.configs.xtts_config import XttsConfig
+        from TTS.tts.models.xtts import XttsArgs, XttsAudioConfig
+
+        torch.serialization.add_safe_globals([XttsConfig, XttsAudioConfig, XttsArgs, BaseDatasetConfig])
 
         from TTS.api import TTS
     except ImportError as e:

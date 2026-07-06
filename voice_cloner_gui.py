@@ -1016,8 +1016,13 @@ class VoiceClonerApp(tk.Tk):
             emotion = res["label"]
             preset = self._get_preset_for_emotion(emotion)
             self.after(0, lambda: style_var.set(preset))
-        except:
-            pass
+        except Exception as e:
+            # Auto-emotion-detection is a convenience feature -- if it fails,
+            # the job just keeps its current/default style preset rather
+            # than blocking generation. Logged (rather than silently
+            # swallowed) so a real problem (e.g. BERT model not loaded)
+            # is visible instead of just "auto-style silently did nothing."
+            self.after(0, lambda e=e: self._log(f"BERT auto-style failed: {e}", WARNING))
 
     def _get_preset_for_emotion(self, emotion):
         """Backend-aware BERT emotion → preset mapping."""
@@ -2058,8 +2063,11 @@ class VoiceClonerApp(tk.Tk):
         self._job_entries.clear()
         if hasattr(self, "_job_batch_headers"):
             for h in self._job_batch_headers:
+                # Widget may already be destroyed as part of the parent
+                # teardown; Tkinter raises TclError in that case, which is
+                # fine to ignore here.
                 try: h.destroy()
-                except: pass
+                except tk.TclError: pass
             self._job_batch_headers = []
         self._job_output_files = {}
 
@@ -2693,11 +2701,17 @@ class VoiceClonerApp(tk.Tk):
                 f"Delete all {len(files)} WAV files in {os.path.basename(folder)}?"):
             return
         self._stop_playback()
+        failed = []
         for f in files:
             try: os.remove(f)
-            except: pass
+            except OSError as e: failed.append((f, e))
         self._refresh_output_list()
-        self._log("Output folder cleared.", TEXT_MUT)
+        if failed:
+            self._log(f"Output folder cleared, but {len(failed)} file(s) could not be deleted "
+                       f"(in use or permission denied): {', '.join(os.path.basename(f) for f, _ in failed)}",
+                       DANGER)
+        else:
+            self._log("Output folder cleared.", TEXT_MUT)
 
 
     # ══ RIGHT PANEL ═════════════════════════════════════════════════════════
@@ -2909,10 +2923,39 @@ class VoiceClonerApp(tk.Tk):
             try:
                 if w.is_alive():
                     w._proc.kill()
-            except:
+            except Exception:
+                # Process may have already exited between is_alive() and
+                # kill(), or the platform-specific kill() call can raise
+                # different exception types -- either way, "stop" should
+                # never itself crash the GUI.
                 pass
 
+    def _ensure_voice_consent(self) -> bool:
+        """One-time reminder that the user is responsible for having the
+        right to clone/use whatever reference voice they've supplied.
+        See docs/VOICE_ETHICS.md. Acknowledgment is persisted to
+        CONFIG_FILE so this only interrupts the user once, not per job.
+        """
+        if self.config_data.get("voice_consent_ack"):
+            return True
+        agreed = messagebox.askyesno(
+            "Before you generate",
+            "VoiceTTSr can clone the voice in whatever reference audio you provide.\n\n"
+            "By continuing, you confirm you have the right to use and clone this voice "
+            "(it's your own voice, you have explicit permission, or it's a fully "
+            "synthetic/fictional voice) and that you won't use generated audio to "
+            "impersonate a real person without their consent.\n\n"
+            "See docs/VOICE_ETHICS.md for details. Continue?",
+        )
+        if agreed:
+            self.config_data["voice_consent_ack"] = True
+            self._save_config()
+        return agreed
+
     def _generate_all(self):
+        if not self._ensure_voice_consent():
+            return
+
         backend = self._backend_var.get()
         worker_map = {"xtts": self._xtts_worker, "qwen": self._qwen_worker,
                       "chatterbox": self._chatterbox_worker}
@@ -2938,10 +2981,15 @@ class VoiceClonerApp(tk.Tk):
             if custom and os.path.isdir(custom):
                 out_dir = custom
             elif custom: # If it's a valid path but not a dir, try creating it
-                try: 
+                try:
                     os.makedirs(custom, exist_ok=True)
                     out_dir = custom
-                except: pass
+                except OSError as e:
+                    # Falling back to the default out_dir silently here
+                    # would mean generated files land somewhere other than
+                    # where the user configured, with no indication why.
+                    self._log(f"Could not create custom output folder '{custom}' ({e}); "
+                               f"using default folder '{out_dir}' instead.", DANGER)
         
         os.makedirs(out_dir, exist_ok=True)
         self._stop_generation.clear()
@@ -3133,7 +3181,14 @@ class VoiceClonerApp(tk.Tk):
                                     path = _chunk_queue.get_nowait()
                                     pygame.mixer.music.load(path)
                                     pygame.mixer.music.play()
-                            except: pass
+                            except _q.Empty:
+                                # Expected/normal: no chunk ready yet this poll.
+                                pass
+                            except Exception:
+                                # Playback errors (e.g. a chunk file that got
+                                # cleaned up mid-stream) shouldn't kill the
+                                # polling loop -- just skip this tick.
+                                pass
                         if _stream_active[0]: self.after(150, _drain_chunks)
                     self._qwen_worker._on_chunk = _on_chunk
                     self.after(200, _drain_chunks)

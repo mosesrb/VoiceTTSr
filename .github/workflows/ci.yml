@@ -1,0 +1,72 @@
+name: CI
+
+# Minimal CI: this project's real "integration test" needs a Windows box
+# with a CUDA GPU and four separate Conda/venv environments, which isn't
+# practical to run on every push. This workflow instead catches the two
+# cheapest, highest-value regressions: syntax errors, and a requirements.txt
+# that silently stops installing (like the numpy==1.23.5 / Python 3.12
+# incompatibility found in the 2026-07-03 audit).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  syntax-check:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Byte-compile all Python sources
+        run: python -m py_compile *.py
+
+  gui-requirements-install:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # The GUI process itself (voice_cloner_gui.py) is lightweight and
+        # doesn't require a GPU, so its requirements.txt is safe to
+        # actually install in CI. The per-engine worker requirements
+        # (rvc_requirements.txt, and whatever xtts-env/qwen-env/
+        # chatterbox-env pin) are NOT installed here -- they assume a
+        # Windows + CUDA target and are impractical for a hosted runner.
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install GUI requirements
+        run: pip install -r requirements.txt
+
+  download-resources-smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install download_resources.py's own deps
+        run: pip install requests tqdm
+
+      - name: Exercise --print-hash and --help (no real downloads)
+        run: |
+          python download_resources.py --help
+          echo "test content" > /tmp/dummy_file
+          python download_resources.py --print-hash /tmp/dummy_file

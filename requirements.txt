@@ -1,7 +1,22 @@
 # VoiceTTSr GUI Dependencies
+#
+# This is the environment for voice_cloner_gui.py itself (the Tkinter
+# orchestrator process). It is intentionally lightweight -- it does not
+# load any ML models directly, only spawns/talks to the per-engine workers
+# (xtts-env, qwen-env, chatterbox-env, rvc-env), which have their own
+# separate requirements files. Do not add heavy ML packages here.
+#
+# Tested against Python 3.10-3.12. numpy was previously pinned to 1.23.5,
+# which has no installable wheel on Python >=3.12 (it predates that
+# release and fails to build from source without legacy `distutils`,
+# removed in Python 3.12). The GUI only uses numpy for basic array/audio
+# stats (see e.g. _run_auto_detect, _run_score_refs in voice_cloner_gui.py)
+# with no dependency on numpy's older API, so a modern numpy is safe here
+# -- this does NOT need to match whatever numpy version any individual
+# engine's own isolated environment uses.
 pydub==0.25.1
 pygame==2.6.1
-numpy==1.23.5
+numpy>=1.26,<3
 requests==2.32.3
 tqdm==4.66.4
 

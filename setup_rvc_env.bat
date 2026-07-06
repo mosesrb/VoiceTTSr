@@ -41,6 +41,21 @@ if errorlevel 1 (
 
 echo.
 echo [6/6] Installing rvc-python...
+REM --no-deps is deliberate: rvc-python declares fastapi/pydantic/uvicorn as
+REM dependencies, but those are only used by its own optional REST API
+REM server (rvc_python/api.py, rvc_python/__main__.py). This project only
+REM imports "from rvc_python.infer import RVCInference" (see rvc_worker.py),
+REM which never touches that code path. Installing rvc-python's full
+REM dependency set would also risk clobbering the pinned torch/numpy/
+REM fairseq versions set up in steps 2-5 above.
+REM
+REM Expect pip to print a warning after this step like:
+REM   "rvc-python 0.1.5 requires fastapi, which is not installed."
+REM   "rvc-python 0.1.5 requires pydantic, which is not installed."
+REM   "rvc-python 0.1.5 requires uvicorn, which is not installed."
+REM This is expected and safe to ignore -- it does not affect anything
+REM VoiceTTSr actually uses. Do NOT "fix" it by installing those three
+REM packages or by removing --no-deps.
 "%ENV%\Scripts\python.exe" -m pip install rvc-python --no-deps
 "%ENV%\Scripts\python.exe" -m pip install praat-parselmouth pyworld
 
