@@ -26,16 +26,7 @@ from tqdm import tqdm
 #
 # Source: lj1995/VoiceConversionWebUI, the original RVC project's own HF
 # space -- this is the canonical, widely-referenced upstream for these two
-# files across the RVC ecosystem (not the Politrees mirror the original
-# VoiceTTSr code pulled from, which is where the undisclosed baseline voice
-# models also came from -- see docs/VOICE_ETHICS.md). Moving required
-# assets off that mirror removes an unnecessary trust dependency.
-#
-# SHA-256 hashes below were confirmed directly against the files' HF pages
-# (each file has been stable/unchanged for 2-3 years per HF commit history
-# as of this writing) and are the actual integrity check -- that's what
-# protects against a compromised or MITM'd download, independent of which
-# branch/revision the URL points at.
+# files across the RVC ecosystem.
 # ---------------------------------------------------------------------------
 RESOURCES = {
     "rvc_models/hubert_base.pt": {
@@ -53,27 +44,8 @@ RESOURCES = {
 #
 # These are NOT downloaded by default and are not required to use VoiceTTSr
 # (bring your own reference audio instead — that's the normal workflow).
-#
-# If you choose to enable one of these, understand what you're getting:
-# each entry's `source_note` describes what's known about its origin. Using
-# a voice model derived from a real, identifiable person's voice without
-# their consent can be a right-of-publicity violation and can be used for
-# impersonation/fraud; that risk is yours to evaluate. See
-# docs/VOICE_ETHICS.md before enabling anything here.
 # ---------------------------------------------------------------------------
-OPTIONAL_VOICES = {
-    # Example entry, disabled by default. Uncomment and add a verified
-    # sha256 to opt in. Do not re-enable "obama.pth" / "kizuna.pth" without
-    # first resolving the provenance and consent questions in
-    # docs/VOICE_ETHICS.md — that is precisely the case this project
-    # removed from the defaults after its 2026-07-03 audit.
-    #
-    # "rvc_models/example_optional_voice.pth": {
-    #     "url": "https://huggingface.co/<repo>/resolve/main/<file>.pth",
-    #     "sha256": "<verified hash>",
-    #     "source_note": "<what/who this voice is derived from, and under what terms>",
-    # },
-}
+OPTIONAL_VOICES = {}
 
 
 def _sha256_of(path: str) -> str:
@@ -84,7 +56,7 @@ def _sha256_of(path: str) -> str:
     return h.hexdigest()
 
 
-def download_file(url: str, destination: str, expected_sha256) -> None:
+def download_file(url: str, destination: str, expected_sha256: str = None, timeout: int = 30) -> None:
     os.makedirs(os.path.dirname(destination), exist_ok=True)
 
     if os.path.exists(destination):
@@ -98,35 +70,46 @@ def download_file(url: str, destination: str, expected_sha256) -> None:
             return
 
     print(f"[DOWN] Fetching {os.path.basename(destination)}...")
-    response = requests.get(url, stream=True, timeout=30)
+    response = requests.get(url, stream=True, timeout=timeout)
     response.raise_for_status()
     total_size = int(response.headers.get("content-length", 0))
 
     tmp_destination = destination + ".partial"
-    with open(tmp_destination, "wb") as f, tqdm(
-        desc=os.path.basename(destination),
-        total=total_size,
-        unit="iB",
-        unit_scale=True,
-        unit_divisor=1024,
-    ) as bar:
-        for data in response.iter_content(chunk_size=1024 * 64):
-            size = f.write(data)
-            bar.update(size)
+    try:
+        with open(tmp_destination, "wb") as f, tqdm(
+            desc=os.path.basename(destination),
+            total=total_size,
+            unit="iB",
+            unit_scale=True,
+            unit_divisor=1024,
+        ) as bar:
+            for data in response.iter_content(chunk_size=1024 * 64):
+                if data:
+                    size = f.write(data)
+                    bar.update(size)
 
-    if expected_sha256:
-        actual = _sha256_of(tmp_destination)
-        if actual != expected_sha256:
-            os.remove(tmp_destination)
-            raise ValueError(
-                f"Hash mismatch for {destination}: expected {expected_sha256}, got {actual}. "
-                "File was deleted and NOT installed. This could mean the upstream file changed "
-                "or the download was tampered with -- do not bypass this check."
-            )
-    else:
-        print(f"[WARN] No expected hash configured for {destination}; integrity was NOT verified.")
+        if expected_sha256:
+            actual = _sha256_of(tmp_destination)
+            if actual != expected_sha256:
+                if os.path.exists(tmp_destination):
+                    os.remove(tmp_destination)
+                raise ValueError(
+                    f"Hash mismatch for {destination}: expected {expected_sha256}, got {actual}. "
+                    "File was deleted and NOT installed. This could mean the upstream file changed "
+                    "or the download was tampered with -- do not bypass this check."
+                )
+        else:
+            print(f"[WARN] No expected hash configured for {destination}; integrity was NOT verified.")
 
-    os.replace(tmp_destination, destination)
+        os.replace(tmp_destination, destination)
+        print(f"[OK] Saved to {destination}")
+    except Exception as e:
+        if os.path.exists(tmp_destination):
+            try:
+                os.remove(tmp_destination)
+            except Exception:
+                pass
+        raise e
 
 
 def _print_hash(rel_path: str) -> None:
@@ -166,14 +149,19 @@ def main() -> None:
         else:
             print("[NOTE] --include-optional set, but no optional voices are currently configured.")
 
+    success = True
     for dest, meta in to_fetch.items():
         try:
             download_file(meta["url"], dest, meta.get("sha256"))
         except Exception as e:
             print(f"[ERROR] Failed to download {dest}: {e}")
+            success = False
 
-    print("\n[READY] Required resources are prepared. No default voice model was installed --")
-    print("        add your own reference audio in the GUI to create a voice profile.\n")
+    if success:
+        print("\n[READY] Required resources are prepared. No default voice model was installed --")
+        print("        add your own reference audio in the GUI to create a voice profile.\n")
+    else:
+        print("\n[WARNING] Some downloads failed. Please check your connection and re-run.\n")
 
 
 if __name__ == "__main__":

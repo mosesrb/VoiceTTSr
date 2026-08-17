@@ -16,6 +16,19 @@ if not exist "voice_cloner_gui.py" (
 
 :: ── Find Python 3.11 from conda ───────────────────────────────────────────
 set CONDA_PY=
+
+:: First try conda executable discovery
+where.exe conda >nul 2>nul
+if %errorlevel% == 0 (
+    for /f "delims=" %%I in ('conda info --base 2^>nul') do (
+        if exist "%%I\envs\chatterbox\python.exe" (
+            set "CONDA_PY=%%I\envs\chatterbox\python.exe"
+            echo Found conda chatterbox env via conda info at: !CONDA_PY!
+            goto :found_conda
+        )
+    )
+)
+
 for %%P in (
     "%USERPROFILE%\miniconda3\envs\chatterbox\python.exe"
     "%USERPROFILE%\anaconda3\envs\chatterbox\python.exe"
@@ -34,7 +47,7 @@ for %%P in (
 echo.
 echo Could not auto-find your conda chatterbox env.
 echo Please enter the full path to your conda chatterbox python.exe:
-echo Example: C:\Users\Neongiant\miniconda3\envs\chatterbox\python.exe
+echo Example: %USERPROFILE%\miniconda3\envs\chatterbox\python.exe
 echo.
 set /p CONDA_PY="Path: "
 if not exist "%CONDA_PY%" (

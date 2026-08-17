@@ -24,6 +24,16 @@ class SkyrimConverter:
         except Exception as e:
             raise Exception(f"WAV Preprocessing failed: {e}")
 
+    def sanitize_dialogue_text(self, text):
+        """Sanitize dialogue text for FaceFX CLI parameter passing."""
+        if not text or not str(text).strip():
+            return "..."
+        # Replace newlines, tabs, and carriage returns with single spaces
+        clean = " ".join(str(text).replace("\r", " ").replace("\n", " ").replace("\t", " ").split())
+        # Remove non-printable control characters
+        clean = "".join(ch for ch in clean if ch.isprintable())
+        return clean if clean.strip() else "..."
+
     def generate_lip(self, wav_path, text, output_lip_path):
         """Call FaceFXWrapper to generate .lip sync data."""
         if not os.path.exists(self.facefx_exe):
@@ -42,6 +52,7 @@ class SkyrimConverter:
                 "docs/THIRD_PARTY_NOTICES.md for details."
             )
 
+        clean_text = self.sanitize_dialogue_text(text)
         # FaceFXWrapper [Type] [Lang] [FonixDataPath] [WavPath] [LipPath] [Text]
         # We use the 'Skip Resample' mode by providing a pre-processed 16kHz or 44kHz wav
         # Note: FaceFX often prefers 16kHz internally, but the wrapper handles it.
@@ -52,7 +63,7 @@ class SkyrimConverter:
             self.fonix_data,
             wav_path,
             output_lip_path,
-            text
+            clean_text
         ]
         
         # Run subprocess

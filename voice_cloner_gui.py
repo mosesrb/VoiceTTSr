@@ -13,13 +13,26 @@ Chatterbox setup (Python 3.11 env):
     # Then point _CHATTERBOX_PYTHON to that env's python.exe
 """
 
+import sys
+# Enable High-DPI awareness on Windows to prevent blurry text on high-res displays
+if sys.platform == "win32":
+    try:
+        import ctypes
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    except Exception:
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
+
 import tkinter as tk
 from tkinter import ttk, filedialog, scrolledtext, messagebox
 import threading, queue, subprocess, os, glob, json, math, struct, wave
 from pathlib import Path
 from datetime import datetime
-import sys, re
+import re
 from skyrim_utils import SkyrimConverter
+from dsp import normalize_to_wav, get_audio_duration, analyze_audio_file, apply_presence_eq, apply_highpass
 
 # ── pydub lazy import (only used for ref WAV normalization in the GUI) ──────
 def _import_pydub():
@@ -236,13 +249,49 @@ class _TtsWorker:
         except queue.Empty:
             return {"status": "error", "message": "Response timeout."}
 
+    def clear_queue(self):
+        """Drain any pending stale responses from previous executions."""
+        while not self._resp_queue.empty():
+            try:
+                self._resp_queue.get_nowait()
+            except queue.Empty:
+                break
+
     def stop(self):
+        """Terminate the worker subprocess cleanly and clear queue state."""
         if self.is_alive():
             try:
                 self.send({"action": "quit"})
-                self._proc.wait(timeout=5)
+                self._proc.wait(timeout=3)
             except Exception:
-                self._proc.kill()
+                try:
+                    self._proc.kill()
+                except Exception:
+                    pass
+        self._proc = None
+        self._ready_evt.clear()
+        self._starting = False
+        self.clear_queue()
+
+    def restart(self, on_ready, on_error):
+        """Safely stop and respawn the worker."""
+        self.stop()
+        self.start(on_ready, on_error)
+
+
+def _safe_delete_file(path: str) -> bool:
+    """Safely delete file via send2trash if available, falling back to os.remove."""
+    try:
+        import send2trash
+        send2trash.send2trash(os.path.abspath(path))
+        return True
+    except Exception:
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+            return True
+        except Exception:
+            return False
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -1542,7 +1591,7 @@ class VoiceClonerApp(tk.Tk):
 
     def _browse_profile(self):
         p = filedialog.askopenfilename(title="Select voice profile",
-            filetypes=[("Voice profile","*.pth"),("All","*.*")])
+            filetypes=[("Voice profile","*.safetensors;*.pth"),("Safetensors","*.safetensors"),("Legacy PyTorch","*.pth"),("All","*.*")])
         if p: self._profile_var.set(p)
 
     def _find_xtts_paths(self):
@@ -1578,7 +1627,7 @@ class VoiceClonerApp(tk.Tk):
         if not valid_wavs:
             messagebox.showerror("No WAVs", "No valid WAV references found."); return
         out = filedialog.asksaveasfilename(title="Save voice profile as",
-            defaultextension=".pth", filetypes=[("Voice profile","*.pth")])
+            defaultextension=".safetensors", filetypes=[("Safetensors profile","*.safetensors"),("Legacy profile","*.pth")])
         if not out: return
         self._save_profile_btn.config(state="disabled")
         threading.Thread(target=self._run_save_profile,
@@ -1619,7 +1668,7 @@ class VoiceClonerApp(tk.Tk):
         path = self._profile_var.get().strip()
         if not path:
             path = filedialog.askopenfilename(title="Select voice profile",
-                filetypes=[("Voice profile","*.pth"),("All","*.*")])
+                filetypes=[("Voice profile","*.safetensors;*.pth"),("Safetensors","*.safetensors"),("Legacy PyTorch","*.pth"),("All","*.*")])
             if not path: return
             self._profile_var.set(path)
         if not os.path.exists(path):
@@ -1659,7 +1708,7 @@ class VoiceClonerApp(tk.Tk):
         c = self._card(self._qwen_profile_card_frame, "QWEN VOICE PROFILE (Beta)", ACCENT)
         
         pr = tk.Frame(c, bg=CARD_BG); pr.pack(fill="x", pady=(0, 6))
-        tk.Label(pr, text="Profile (.qproc)", width=16, anchor="w",
+        tk.Label(pr, text="Profile (.safetensors/.qproc)", width=16, anchor="w",
                  font=("Courier New", 9), bg=CARD_BG, fg=TEXT_SEC).pack(side="left")
         tk.Entry(pr, textvariable=self._qwen_profile_var, bg=PANEL_BG, fg=TEXT_PRI,
                  insertbackground=TEXT_PRI, relief="flat", bd=4,
@@ -1690,7 +1739,7 @@ class VoiceClonerApp(tk.Tk):
 
     def _browse_qwen_profile(self):
         p = filedialog.askopenfilename(title="Select Qwen profile",
-            filetypes=[("Qwen profile","*.qproc"),("All","*.*")])
+            filetypes=[("Qwen profile","*.safetensors;*.qproc"),("Safetensors","*.safetensors"),("Legacy Qwen","*.qproc"),("All","*.*")])
         if p: self._qwen_profile_var.set(p)
 
     def _save_qwen_profile(self):
@@ -1699,7 +1748,7 @@ class VoiceClonerApp(tk.Tk):
             messagebox.showerror("No WAVs", "No Qwen reference WAVs found."); return
             
         out = filedialog.asksaveasfilename(title="Save Qwen profile as",
-            defaultextension=".qproc", filetypes=[("Qwen profile","*.qproc")])
+            defaultextension=".safetensors", filetypes=[("Safetensors profile","*.safetensors"),("Legacy Qwen","*.qproc")])
         if not out: return
         
         self._save_qwen_btn.config(state="disabled")
@@ -1739,7 +1788,7 @@ class VoiceClonerApp(tk.Tk):
         path = self._qwen_profile_var.get().strip()
         if not path:
             path = filedialog.askopenfilename(title="Select Qwen profile",
-                filetypes=[("Qwen profile","*.qproc"),("All","*.*")])
+                filetypes=[("Qwen profile","*.safetensors;*.qproc"),("Safetensors","*.safetensors"),("Legacy Qwen","*.qproc"),("All","*.*")])
             if not path: return
             self._qwen_profile_var.set(path)
         
@@ -1762,7 +1811,7 @@ class VoiceClonerApp(tk.Tk):
     # ── Chatterbox Voice Profile ───────────────────────────────────────────────
     def _browse_cb_profile(self):
         p = filedialog.askopenfilename(title="Select Chatterbox profile",
-            filetypes=[("Chatterbox profile", "*.cbprof"), ("All", "*.*")])
+            filetypes=[("Chatterbox profile", "*.safetensors;*.cbprof"), ("Safetensors", "*.safetensors"), ("Legacy CB", "*.cbprof"), ("All", "*.*")])
         if p: self._cb_profile_var.set(p)
 
     def _save_cb_profile(self):
@@ -1772,8 +1821,8 @@ class VoiceClonerApp(tk.Tk):
         if not valid_wavs:
             messagebox.showerror("No WAVs", "No valid Chatterbox reference WAVs found."); return
         out = filedialog.asksaveasfilename(title="Save Chatterbox profile as",
-            defaultextension=".cbprof",
-            filetypes=[("Chatterbox profile", "*.cbprof")])
+            defaultextension=".safetensors",
+            filetypes=[("Safetensors profile", "*.safetensors"), ("Legacy Chatterbox", "*.cbprof")])
         if not out: return
         self._save_cb_btn.config(state="disabled")
         threading.Thread(target=self._run_save_cb_profile,
@@ -1806,7 +1855,7 @@ class VoiceClonerApp(tk.Tk):
         path = self._cb_profile_var.get().strip()
         if not path:
             path = filedialog.askopenfilename(title="Select Chatterbox profile",
-                filetypes=[("Chatterbox profile", "*.cbprof"), ("All", "*.*")])
+                filetypes=[("Chatterbox profile", "*.safetensors;*.cbprof"), ("Safetensors", "*.safetensors"), ("Legacy CB", "*.cbprof"), ("All", "*.*")])
             if not path: return
             self._cb_profile_var.set(path)
         if not os.path.exists(path):
@@ -2035,13 +2084,23 @@ class VoiceClonerApp(tk.Tk):
             self._job_mood_combos = []
         self._job_mood_combos.append(style_cb)
 
+        _bert_timer = [None]
         def _on_text_change(*args):
             if self._bert_director.get() and self._bert_pipeline:
                 txt = var.get().strip()
                 if len(txt) > 8: # min length to avoid noise
-                    threading.Thread(target=self._run_job_bert, args=(txt, job_mood_var), daemon=True).start()
+                    if _bert_timer[0] is not None:
+                        try:
+                            self.after_cancel(_bert_timer[0])
+                        except Exception:
+                            pass
+                    # Debounce by 350ms to avoid spawning threads on every keystroke
+                    _bert_timer[0] = self.after(350, lambda: threading.Thread(
+                        target=self._run_job_bert, args=(txt, job_mood_var), daemon=True).start())
         var.trace_add("write", _on_text_change)
-        if text: _on_text_change() # Trigger for initial import
+        if text:
+            # Trigger synchronously or after short delay for initial import
+            _on_text_change()
 
         play_btn = self._btn(row, "▶", lambda i=idx: self._play_job_output(i),
                              small=True)
@@ -2652,7 +2711,7 @@ class VoiceClonerApp(tk.Tk):
             return
         try:
             self._stop_playback()
-            os.remove(self._current_file)
+            _safe_delete_file(self._current_file)
             self._current_file = None
             self._wave_data    = None
             self._wave_canvas.delete("all")
@@ -2703,8 +2762,10 @@ class VoiceClonerApp(tk.Tk):
         self._stop_playback()
         failed = []
         for f in files:
-            try: os.remove(f)
-            except OSError as e: failed.append((f, e))
+            try:
+                _safe_delete_file(f)
+            except OSError as e:
+                failed.append((f, e))
         self._refresh_output_list()
         if failed:
             self._log(f"Output folder cleared, but {len(failed)} file(s) could not be deleted "
@@ -2781,6 +2842,12 @@ class VoiceClonerApp(tk.Tk):
                     "Then rename/link the env as 'chatterbox-env-py311' in the app folder.")
                 return
             self._log("Starting Chatterbox worker (chatterbox-env-py311)…", WARNING)
+
+        # VRAM Management: Stop other heavyweight workers to avoid CUDA Out of Memory on single GPU
+        for other_backend, other_worker in [("xtts", self._xtts_worker), ("qwen", self._qwen_worker), ("chatterbox", self._chatterbox_worker)]:
+            if other_backend != backend and other_worker.is_alive():
+                self._log(f"VRAM Manager: Stopping idle {other_backend.upper()} worker to free GPU memory…", WARNING)
+                other_worker.stop()
 
         self._load_model_btn.config(state="disabled")
         self._set_status("loading model…", WARNING)
@@ -2912,22 +2979,18 @@ class VoiceClonerApp(tk.Tk):
         threading.Thread(target=_run, daemon=True).start()
 
     def _stop_gen(self):
-        """Signal the generation loop to stop immediately."""
+        """Signal the generation loop to stop immediately and cleanly reset workers."""
         self._stop_generation.set()
-        self._log("Global Stop — killing worker processes immediately…", DANGER)
-        self._set_status("killing processes…", DANGER)
+        self._log("Global Stop — terminating active worker pipelines…", DANGER)
+        self._set_status("stopping generation…", DANGER)
         self.after(0, lambda: self._stop_btn.config(state="disabled"))
         
-        # Hard kill the active backends for immediate stop
+        # Stop and drain active backends so subsequent runs start clean
         for w in [self._xtts_worker, self._qwen_worker, self._rvc_worker, self._chatterbox_worker]:
             try:
                 if w.is_alive():
-                    w._proc.kill()
+                    w.stop()
             except Exception:
-                # Process may have already exited between is_alive() and
-                # kill(), or the platform-specific kill() call can raise
-                # different exception types -- either way, "stop" should
-                # never itself crash the GUI.
                 pass
 
     def _ensure_voice_consent(self) -> bool:

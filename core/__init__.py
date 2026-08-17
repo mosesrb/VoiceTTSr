@@ -1,0 +1,3 @@
+"""
+VoiceTTSr Core Package
+"""

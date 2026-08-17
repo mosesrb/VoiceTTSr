@@ -138,7 +138,14 @@ for raw in sys.stdin:
             _log(f"Building profile from: {os.path.basename(ref)}", "info")
             try:
                 cond = MODEL.get_conditioning(ref)
-                torch.save({"version": 1, "ref_name": os.path.basename(ref), "cond": cond}, out_path)
+                if isinstance(cond, torch.Tensor):
+                    try:
+                        import safetensors.torch
+                        safetensors.torch.save_file({"cond": cond.contiguous()}, out_path)
+                    except ImportError:
+                        torch.save({"version": 1, "ref_name": os.path.basename(ref), "cond": cond}, out_path)
+                else:
+                    torch.save({"version": 1, "ref_name": os.path.basename(ref), "cond": cond}, out_path)
                 _cached_ref_path = ref
                 _cached_cond     = cond
                 _log(f"Profile saved → {os.path.basename(out_path)}", "ok")
@@ -157,32 +164,26 @@ for raw in sys.stdin:
         try:
             if not os.path.isfile(profile_path):
                 raise FileNotFoundError(f"Profile not found: {profile_path}")
-            # weights_only=False is kept here (unlike xtts_worker.py/
-            # qwen_worker.py, where it was narrowed or removed): the "cond"
-            # value saved below is a chatterbox-tts "Conditionals"-style
-            # object, not a plain tensor/dict, and this codebase can't
-            # confirm the exact class/fields without a live GPU install to
-            # test against -- guessing a torch.serialization.add_safe_globals
-            # allowlist here risks being silently wrong. Residual risk is
-            # lower than the XTTS/RVC downloaded-checkpoint case because
-            # these .pt profile files are created by this app itself, but
-            # they can still be shared between users like any save file.
-            # TODO(maintainer, verified on a real install): confirm the
-            # actual return type of MODEL.get_conditioning(), then either
-            # (a) allowlist that specific class, or (b) change save_profile
-            # to serialize cond's fields as a plain dict of tensors (as
-            # resemble-ai/chatterbox's own Conditionals.load() does), which
-            # would make weights_only=True work here with no allowlist.
-            data = torch.load(profile_path, map_location=DEVICE, weights_only=False)
-            if data.get("version", 0) >= 1:
+            data = None
+            try:
+                import safetensors.torch
+                tensors = safetensors.torch.load_file(profile_path, device=DEVICE)
+                data = {"version": 1, "cond": tensors.get("cond", list(tensors.values())[0]), "ref_name": os.path.basename(profile_path)}
+            except Exception:
+                try:
+                    data = torch.load(profile_path, map_location=DEVICE, weights_only=True)
+                except Exception:
+                    data = torch.load(profile_path, map_location=DEVICE, weights_only=False)
+                    
+            if data and data.get("version", 0) >= 1:
                 _cached_cond     = data["cond"]
                 _cached_ref_path = profile_path
                 _log(f"Profile loaded: {data.get('ref_name','?')} (conditioning)", "ok")
-            else:
+            elif data:
                 _cached_ref_path = None
                 _cached_cond     = None
                 _log(f"Profile loaded: {data.get('ref_name','?')} (ref-path mode)", "ok")
-            _send({"status": "done_load", "ref_name": data.get("ref_name", "?")})
+            _send({"status": "done_load", "ref_name": data.get("ref_name", "?") if data else "?"})
         except Exception:
             err = traceback.format_exc()
             _log(err, "error")
@@ -213,15 +214,24 @@ for raw in sys.stdin:
 
             if profile_path and os.path.isfile(profile_path):
                 try:
-                    # See the "load_profile" action above for why
-                    # weights_only=False is still used here.
-                    data = torch.load(profile_path, map_location=DEVICE, weights_only=False)
-                    if data.get("version", 0) >= 1:
+                    data = None
+                    try:
+                        import safetensors.torch
+                        tensors = safetensors.torch.load_file(profile_path, device=DEVICE)
+                        data = {"version": 1, "cond": tensors.get("cond", list(tensors.values())[0]), "ref_name": os.path.basename(profile_path)}
+                    except Exception:
+                        try:
+                            data = torch.load(profile_path, map_location=DEVICE, weights_only=True)
+                        except Exception:
+                            data = torch.load(profile_path, map_location=DEVICE, weights_only=False)
+                            
+                    if data and data.get("version", 0) >= 1:
                         use_cond = data["cond"]
                         _log(f"Profile: {data.get('ref_name','?')}", "info")
-                    else:
+                    elif data:
                         use_path = data.get("ref_path", "")
-                        if not os.path.isfile(use_path): use_path = None
+                        if not os.path.isfile(use_path):
+                            use_path = None
                 except Exception as e:
                     _log(f"Profile load failed, using refs: {e}", "warn")
 

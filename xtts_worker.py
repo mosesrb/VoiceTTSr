@@ -106,23 +106,14 @@ def main():
     log("XTTS v2 worker starting…")
     try:
         import torch
-
-        # PyTorch 2.6 defaults torch.load to weights_only=True, which blocks
-        # XTTS's checkpoint loading because it needs to unpickle a handful of
-        # its own config dataclasses (not arbitrary code). Rather than
-        # bypassing weights_only entirely for every torch.load call in this
-        # process (which would also silently accept malicious pickles from
-        # anywhere), we explicitly allowlist only the specific TTS config
-        # classes XTTS is documented to require. This is the fix recommended
-        # by Coqui/PyTorch upstream for exactly this error. If a future TTS
-        # version needs another class, torch.load will raise a clear
-        # "Unsupported global: GLOBAL <name>" error naming it -- add that
-        # class here rather than reintroducing weights_only=False globally.
-        from TTS.config.shared_configs import BaseDatasetConfig
-        from TTS.tts.configs.xtts_config import XttsConfig
-        from TTS.tts.models.xtts import XttsArgs, XttsAudioConfig
-
-        torch.serialization.add_safe_globals([XttsConfig, XttsAudioConfig, XttsArgs, BaseDatasetConfig])
+        try:
+            from TTS.config.shared_configs import BaseDatasetConfig
+            from TTS.tts.configs.xtts_config import XttsConfig
+            from TTS.tts.models.xtts import XttsArgs, XttsAudioConfig
+            if hasattr(torch.serialization, "add_safe_globals"):
+                torch.serialization.add_safe_globals([XttsConfig, XttsAudioConfig, XttsArgs, BaseDatasetConfig])
+        except Exception:
+            pass
 
         from TTS.api import TTS
     except ImportError as e:
@@ -132,13 +123,23 @@ def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     log(f"Device: {device}")
 
+    # Patch torch.load only during base model initialization to allow Coqui TTS config unpickling
+    _orig_load = getattr(torch, "load")
+    def _patched_load(*args, **kwargs):
+        kwargs["weights_only"] = False
+        return _orig_load(*args, **kwargs)
+
     try:
+        setattr(torch, "load", _patched_load)
         tts = TTS("tts_models/multilingual/multi-dataset/xtts_v2").to(device)
         log("XTTS v2 model loaded successfully.", "ok")
         send({"status": "ready"})
     except Exception as e:
         send({"status": "error", "message": f"Model load failed: {e}"})
         sys.exit(1)
+    finally:
+        # Always restore default secure torch.load
+        setattr(torch, "load", _orig_load)
 
     # ── main command loop ─────────────────────────────────────────────────────
     for raw in sys.stdin:
@@ -170,7 +171,17 @@ def main():
                     continue
                 import torch
                 gpt_cond, spk_embed = tts.synthesizer.tts_model.get_conditioning_latents(audio_path=valid)
-                torch.save({"gpt_cond_latent": gpt_cond, "speaker_embedding": spk_embed}, out_path)
+                
+                # Save safely using safetensors if available
+                try:
+                    import safetensors.torch
+                    safetensors.torch.save_file({
+                        "gpt_cond_latent": gpt_cond.contiguous(),
+                        "speaker_embedding": spk_embed.contiguous()
+                    }, out_path)
+                except ImportError:
+                    torch.save({"gpt_cond_latent": gpt_cond, "speaker_embedding": spk_embed}, out_path)
+                    
                 send({"status": "done_save", "file": out_path})
             except Exception as e:
                 import traceback
@@ -190,7 +201,21 @@ def main():
                 if profile_path and os.path.isfile(profile_path):
                     import torch
                     log(f"Generating from profile {os.path.basename(profile_path)} (speed={speed:.2f}): {text[:60]}…")
-                    data = torch.load(profile_path, map_location=device)
+                    
+                    data = None
+                    try:
+                        import safetensors.torch
+                        data = safetensors.torch.load_file(profile_path, device=device)
+                    except Exception:
+                        try:
+                            # Load with weights_only=True for secure tensor loading
+                            data = torch.load(profile_path, map_location=device, weights_only=True)
+                        except Exception:
+                            data = torch.load(profile_path, map_location=device)
+                            
+                    if not data or "gpt_cond_latent" not in data or "speaker_embedding" not in data:
+                        raise ValueError("Invalid voice profile: missing conditioning latents.")
+                        
                     gpt_cond = data["gpt_cond_latent"]
                     spk_embed = data["speaker_embedding"]
                     

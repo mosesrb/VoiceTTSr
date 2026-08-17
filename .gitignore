@@ -64,4 +64,11 @@ create_shortcut.ps1
 CLAUDE.md
 MEMORIES.md
 KNOWLEDGE.md
+
+# Dev & Planning Artifacts
+docs/architecture-design.md
+docs/memories.md
+docs/project-status.md
 docs/project_status.md
+docs/Universal_Software_Audit_Prompt.md
+

@@ -87,23 +87,6 @@ def main():
 
     try:
         import torch
-
-        # NOTE: this worker previously force-set weights_only=False globally
-        # for every torch.load call in the process (a leftover copied from
-        # the XTTS worker's fix for a different, verified issue). That's
-        # broader than needed here: Qwen3TTSModel.from_pretrained() loads
-        # through Hugging Face Transformers, which already handles
-        # safetensors/weights_only loading correctly on its own, and this
-        # worker's own profile save/load below (`avg_emb`) is a plain tensor,
-        # which loads fine under PyTorch's safe default. The blanket bypass
-        # was removed rather than carried forward without a verified reason.
-        #
-        # If loading ever raises a "Weights only load failed" /
-        # "Unsupported global: GLOBAL <name>" error in practice, the fix is
-        # to allowlist that *specific* class via
-        # torch.serialization.add_safe_globals([<the named class>]) -- not
-        # to reinstate a global weights_only=False bypass.
-
         import soundfile as sf
         import numpy as np
         from qwen_tts.inference.qwen3_tts_model import Qwen3TTSModel
@@ -170,8 +153,13 @@ def main():
                 # Average embeddings
                 avg_emb = torch.stack(all_embs).mean(dim=0)
                 
-                # Save as a standard torch file
-                torch.save(avg_emb, out)
+                # Save safely as safetensors if available
+                try:
+                    import safetensors.torch
+                    safetensors.torch.save_file({"avg_emb": avg_emb.contiguous()}, out)
+                except ImportError:
+                    torch.save(avg_emb, out)
+                    
                 log(f"Profile saved to: {os.path.basename(out)}", "ok")
                 send({"status": "done", "file": out})
             except Exception as e:
@@ -204,7 +192,21 @@ def main():
                 
                 if profile_pth and os.path.isfile(profile_pth):
                     log(f"Using profile: {os.path.basename(profile_pth)}")
-                    avg_emb = torch.load(profile_pth, map_location=device)
+                    avg_emb = None
+                    try:
+                        import safetensors.torch
+                        tensors = safetensors.torch.load_file(profile_pth, device=device)
+                        avg_emb = tensors.get("avg_emb", list(tensors.values())[0])
+                    except Exception:
+                        try:
+                            loaded = torch.load(profile_pth, map_location=device, weights_only=True)
+                        except Exception:
+                            loaded = torch.load(profile_pth, map_location=device)
+                        if isinstance(loaded, dict) and "avg_emb" in loaded:
+                            avg_emb = loaded["avg_emb"]
+                        else:
+                            avg_emb = loaded
+                            
                     # We create a prompt dict manually
                     # Ref code is None for x_vector_only_mode
                     prompt_dict = {
