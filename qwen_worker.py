@@ -97,15 +97,28 @@ def main():
         sys.exit(1)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    log(f"Device: {device}")
+    def _is_qwen_cached(model_id):
+        hf_home = os.getenv("HF_HOME", os.path.expanduser("~/.cache/huggingface/hub"))
+        repo_folder = "models--" + model_id.replace("/", "--")
+        model_dir = os.path.join(hf_home, repo_folder)
+        if os.path.isdir(model_dir):
+            snapshots_dir = os.path.join(model_dir, "snapshots")
+            if os.path.isdir(snapshots_dir):
+                try:
+                    if len(os.listdir(snapshots_dir)) > 0:
+                        return True
+                except Exception:
+                    pass
+        return False
 
-    # 1.7B has stronger emotion control and better cloning than 0.6B
-    # Falls back to 0.6B if 1.7B is not downloaded yet
     MODEL_ID = "Qwen/Qwen3-TTS-12Hz-1.7B-Base"
     try:
-        log(f"Loading {MODEL_ID} …")
+        if _is_qwen_cached(MODEL_ID):
+            log(f"[Qwen] Loading cached {MODEL_ID} weights from disk...")
+        else:
+            log(f"[Qwen] Initial Setup: Downloading {MODEL_ID} weights (~3.5 GB) from Hugging Face... (This only happens on first launch, please wait)", "warn")
         model = Qwen3TTSModel.from_pretrained(MODEL_ID)
-        log("Qwen3-TTS model loaded.", "ok")
+        log(f"[Qwen] {MODEL_ID} initialized and ready in VRAM.", "ok")
         send({"status": "ready"})
     except Exception as e:
         send({"status": "error",

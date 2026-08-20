@@ -64,6 +64,8 @@ Because voice embeddings and cloned profiles represent biometric characteristics
 """
 
 
+import re
+
 def _load_doc_file(filepath: str, fallback_title: str) -> str:
     """Safely read a markdown documentation file or return fallback text."""
     if os.path.isfile(filepath):
@@ -73,6 +75,74 @@ def _load_doc_file(filepath: str, fallback_title: str) -> str:
         except Exception as e:
             return f"# {fallback_title}\n\nCould not load file: {e}"
     return f"# {fallback_title}\n\nFile not found at: {filepath}"
+
+
+def _setup_text_tags(widget: tk.Text):
+    """Configure modern typography and color tags for Tkinter Text widget."""
+    widget.tag_configure("h1", font=("Segoe UI", 15, "bold"), foreground=ACCENT, spacing1=16, spacing3=8)
+    widget.tag_configure("h2", font=("Segoe UI", 12, "bold"), foreground=ACCENT3, spacing1=14, spacing3=6)
+    widget.tag_configure("h3", font=("Segoe UI", 10, "bold"), foreground=ACCENT2, spacing1=10, spacing3=4)
+    widget.tag_configure("p", font=("Segoe UI", 10), foreground=TEXT_PRI, spacing1=2, spacing3=4, lmargin1=4, lmargin2=4)
+    widget.tag_configure("quote", font=("Segoe UI", 9, "italic"), foreground=TEXT_SEC, lmargin1=16, lmargin2=16, spacing1=4, spacing3=4)
+    widget.tag_configure("bullet", font=("Segoe UI", 10), foreground=TEXT_PRI, lmargin1=14, lmargin2=28, spacing1=2, spacing3=2)
+    widget.tag_configure("bullet_dot", font=("Segoe UI", 10, "bold"), foreground=ACCENT)
+    widget.tag_configure("num_dot", font=("Segoe UI", 10, "bold"), foreground=ACCENT3)
+    widget.tag_configure("bold", font=("Segoe UI", 10, "bold"), foreground="#ffffff")
+    widget.tag_configure("code", font=("Consolas", 9), foreground="#ff7b72", background="#21262d")
+    widget.tag_configure("hr", font=("Segoe UI", 4), foreground=BORDER, spacing1=8, spacing3=8)
+
+
+def _insert_formatted_line(widget: tk.Text, line_text: str, base_tag: str):
+    """Insert a line of text while parsing inline **bold** and `code` tokens."""
+    pattern = re.compile(r'(\*\*[^*]+\*\*|`[^`]+`)')
+    tokens = pattern.split(line_text)
+    for token in tokens:
+        if not token:
+            continue
+        if token.startswith("**") and token.endswith("**") and len(token) >= 4:
+            widget.insert("end", token[2:-2], (base_tag, "bold"))
+        elif token.startswith("`") and token.endswith("`") and len(token) >= 2:
+            widget.insert("end", f" {token[1:-1]} ", (base_tag, "code"))
+        else:
+            widget.insert("end", token, (base_tag,))
+    widget.insert("end", "\n", (base_tag,))
+
+
+def render_markdown_to_text(widget: tk.Text, markdown_text: str):
+    """Parse and render markdown text with rich styling and typography into a Text widget."""
+    widget.configure(state="normal")
+    widget.delete("1.0", "end")
+    _setup_text_tags(widget)
+
+    lines = markdown_text.splitlines()
+    for line in lines:
+        s = line.strip()
+        if not s:
+            widget.insert("end", "\n")
+            continue
+        if s.startswith("# "):
+            widget.insert("end", s[2:] + "\n", ("h1",))
+        elif s.startswith("## "):
+            widget.insert("end", s[3:] + "\n", ("h2",))
+        elif s.startswith("### "):
+            widget.insert("end", s[4:] + "\n", ("h3",))
+        elif s.startswith("---") or s.startswith("==="):
+            widget.insert("end", "─" * 70 + "\n", ("hr",))
+        elif s.startswith("> "):
+            _insert_formatted_line(widget, "│  " + s[2:], "quote")
+        elif s.startswith("- ") or s.startswith("* "):
+            widget.insert("end", " • ", ("bullet", "bullet_dot"))
+            _insert_formatted_line(widget, s[2:], "bullet")
+        elif re.match(r'^\d+\.\s', s):
+            parts = s.split(".", 1)
+            num_prefix = parts[0] + "."
+            content = parts[1].strip() if len(parts) > 1 else ""
+            widget.insert("end", f" {num_prefix} ", ("bullet", "num_dot"))
+            _insert_formatted_line(widget, content, "bullet")
+        else:
+            _insert_formatted_line(widget, s, "p")
+
+    widget.configure(state="disabled")
 
 
 def show_first_run_agreement(parent: tk.Tk, on_accept, on_decline) -> tk.Toplevel:
@@ -328,10 +398,7 @@ def show_policy_viewer(parent: tk.Tk, initial_tab: int = 0) -> tk.Toplevel:
             else:
                 b.configure(bg=PANEL_BG, fg=TEXT_SEC, font=("Segoe UI", 9))
         
-        viewer.configure(state="normal")
-        viewer.delete("1.0", "end")
-        viewer.insert("1.0", tabs[idx][1])
-        viewer.configure(state="disabled")
+        render_markdown_to_text(viewer, tabs[idx][1])
 
     for idx, (label, _) in enumerate(tabs):
         btn = tk.Button(

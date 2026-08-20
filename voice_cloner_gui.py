@@ -53,14 +53,17 @@ VERSION         = "1.7.0"
 # Qwen:  uses system Python where qwen-tts + transformers==4.57+ are installed
 # Auto-locate Python 3.10 based on environment or system fallback
 _BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
-_XTTS_PYTHON = os.path.join(_BASE_DIR, "xtts-env-py310", "Scripts", "python.exe")
+_XTTS_ENV    = os.path.join(_BASE_DIR, "xtts-env-py310", "Scripts", "python.exe")
+_XTTS_PYTHON = _XTTS_ENV if os.path.isfile(_XTTS_ENV) else sys.executable
+
 _QWEN_ENV    = os.path.join(_BASE_DIR, "qwen-env-py310", "Scripts", "python.exe")
-_RVC_PYTHON  = os.path.join(_BASE_DIR, "rvc-env", "Scripts", "python.exe")
+_QWEN_PYTHON = _QWEN_ENV if os.path.isfile(_QWEN_ENV) else sys.executable
+
+_RVC_ENV     = os.path.join(_BASE_DIR, "rvc-env", "Scripts", "python.exe")
+_RVC_PYTHON  = _RVC_ENV if os.path.isfile(_RVC_ENV) else sys.executable
+
 _CHATTERBOX_ENV    = os.path.join(_BASE_DIR, "chatterbox-env-py311", "Scripts", "python.exe")
 _CHATTERBOX_PYTHON = _CHATTERBOX_ENV if os.path.isfile(_CHATTERBOX_ENV) else sys.executable
-
-# Fallback to system python if venvs aren't found
-_QWEN_PYTHON = _QWEN_ENV if os.path.isfile(_QWEN_ENV) else sys.executable
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -143,13 +146,13 @@ class _TtsWorker:
                 self._resp_queue.put(msg)
 
     def _wait_ready(self, on_ready, on_error):
-        ok = self._ready_evt.wait(timeout=180)
+        ok = self._ready_evt.wait(timeout=600)
         self._starting = False
         if ok:
             on_ready()
         else:
             rc = self._proc.poll()
-            on_error(f"Worker failed to start (exit code={rc}).")
+            on_error(f"Worker startup timed out or failed (exit code={rc}).")
 
     def send(self, cmd: dict):
         if self.is_alive():

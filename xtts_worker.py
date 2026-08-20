@@ -128,6 +128,23 @@ def get_duration(path):
         return 0.0
 
 
+def _is_xtts_cached():
+    candidates = [
+        os.path.join(os.getenv("TTS_HOME", os.path.expanduser("~/.local/share/tts")), "tts_models--multilingual--multi-dataset--xtts_v2"),
+        os.path.join(os.path.expanduser("~/AppData/Local/tts"), "tts_models--multilingual--multi-dataset--xtts_v2"),
+        os.path.join(os.getenv("LOCALAPPDATA", ""), "tts", "tts_models--multilingual--multi-dataset--xtts_v2"),
+    ]
+    for c in candidates:
+        if c and os.path.isdir(c):
+            try:
+                files = os.listdir(c)
+                if any(f.endswith(".pth") or f.endswith(".json") for f in files):
+                    return True
+            except Exception:
+                pass
+    return False
+
+
 def main():
     log("XTTS v2 worker starting…")
     try:
@@ -157,8 +174,12 @@ def main():
 
     try:
         setattr(torch, "load", _patched_load)
+        if _is_xtts_cached():
+            log("[XTTS] Loading cached XTTS v2 model weights from disk...")
+        else:
+            log("[XTTS] Initial Setup: Downloading XTTS v2 model weights (~2.0 GB) from Hugging Face... (This only happens on first launch, please wait)", "warn")
         tts = TTS("tts_models/multilingual/multi-dataset/xtts_v2").to(device)
-        log("XTTS v2 model loaded successfully.", "ok")
+        log("[XTTS] XTTS v2 model initialized and ready in VRAM.", "ok")
         send({"status": "ready"})
     except Exception as e:
         send({"status": "error", "message": f"Model load failed: {e}"})

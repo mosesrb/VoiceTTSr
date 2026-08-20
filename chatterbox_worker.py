@@ -24,12 +24,28 @@ except ImportError as e:
     sys.exit(1)
 
 DEVICE = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
-_log(f"Using device: {DEVICE}", "warn")
+_log(f"Using device: {DEVICE}", "info")
 
-_log("Loading Chatterbox model (first run downloads ~1.5 GB)…", "warn")
+def _is_chatterbox_cached():
+    hf_home = os.getenv("HF_HOME", os.path.expanduser("~/.cache/huggingface/hub"))
+    model_dir = os.path.join(hf_home, "models--resemble-ai--chatterbox")
+    if os.path.isdir(model_dir):
+        snapshots_dir = os.path.join(model_dir, "snapshots")
+        if os.path.isdir(snapshots_dir):
+            try:
+                if len(os.listdir(snapshots_dir)) > 0:
+                    return True
+            except Exception:
+                pass
+    return False
+
 try:
+    if _is_chatterbox_cached():
+        _log("[Chatterbox] Loading cached Chatterbox model weights from disk…", "info")
+    else:
+        _log("[Chatterbox] Initial Setup: Downloading Chatterbox model weights (~1.5 GB) from Hugging Face… (This only happens on first launch, please wait)", "warn")
     MODEL = ChatterboxTTS.from_pretrained(device=DEVICE)
-    _log("Chatterbox model loaded!", "ok")
+    _log("[Chatterbox] Chatterbox model initialized and ready in VRAM.", "ok")
 except Exception as e:
     _send({"status": "error", "message": f"Model load failed: {e}"})
     sys.exit(1)
