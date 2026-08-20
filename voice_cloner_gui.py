@@ -27,7 +27,7 @@ enable_high_dpi()
 
 import tkinter as tk
 from tkinter import ttk, filedialog, scrolledtext, messagebox
-import threading, queue, subprocess, os, glob, json, math, struct, wave
+import sys, threading, queue, subprocess, os, glob, json, math, struct, wave
 from pathlib import Path
 from datetime import datetime
 import re
