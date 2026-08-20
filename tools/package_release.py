@@ -39,25 +39,24 @@ def clean_pycache():
 
 def generate_release_notes():
     notes_path = os.path.join(DIST_DIR, "RELEASE_NOTES.md")
-    notes_content = f"""# VoiceTTSr v{VERSION} — Release Notes
+    notes_content = f"""# VoiceTTSr v{VERSION}
 
-## 🎙️ What's New in v{VERSION}
+Windows installer release for VoiceTTSr.
 
-### ⚡ Highlights & New Features
-* **Multi-Engine Voice Studio**: Seamless switching between Coqui XTTS v2, Qwen3-TTS (with emotion tags & voice design), Chatterbox (accelerated diffusion), and RVC v2 voice conversion.
-* **First-Launch Ethical Use, Terms & Privacy Agreement**: Explicit biometric consent verification, 100% offline data guarantees, and in-app policy viewers.
-* **Audio Health Analyzer**: Built-in FFT spectral analyzer, SNR estimator, DC offset detector, and automated normalization.
-* **Bethesda Modding Toolkit**: Direct generation of `.lip` lip-sync and `.fuz` audio packing for Skyrim Special Edition.
-* **High-DPI 4K Support**: Native per-monitor scaling on Windows 10/11.
+## What's Changed
 
----
+* **First-Run Terms & Privacy Notice**: Added first-launch consent agreement and privacy documentation explaining 100% local processing and zero telemetry.
+* **Audio Post-Processing Fix**: Fixed XTTS pro-audio post-processor dependency issue and added high-pass/normalization fallback.
+* **Profile Security Hardening**: Enforced safe tensor verification (`weights_only=True`) by default when loading voice profiles.
+* **Cross-Platform Wine Support**: Added automatic Wine command detection in Skyrim export tools for non-Windows environments.
+* **UI Modularization**: Refactored UI themes, color palettes, and preset maps into dedicated packages.
+* **Automated Tests**: Expanded unit test suite to 32 automated tests with 100% pass rate.
 
-### 📦 Installation
-1. Download `{ZIP_NAME}` and extract to any folder.
-2. Run `install_all.bat` to initialize the isolated engine environments.
-3. Launch via `VoiceTTSr.exe` (or `VoiceTTSr.bat`).
+## Installation
 
-*Note: On first engine launch, required AI weights are downloaded locally into your cache. Once downloaded, all voice cloning and synthesis operates 100% offline.*
+1. Download and run `VoiceTTSr_Setup_v{VERSION}.exe`.
+2. Follow the setup wizard to complete installation and add the desktop shortcut.
+3. Launch VoiceTTSr from your Desktop or Start Menu.
 """
     with open(notes_path, "w", encoding="utf-8") as f:
         f.write(notes_content)
