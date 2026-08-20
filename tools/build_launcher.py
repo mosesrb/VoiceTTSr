@@ -40,7 +40,7 @@ def build_executable():
         "-m",
         "PyInstaller",
         "--noconfirm",
-        "--onedir",
+        "--onefile",
         "--windowed",
         "--name",
         "VoiceTTSr",
@@ -50,27 +50,27 @@ def build_executable():
         cmd.extend(["--icon", ICON_PATH])
 
     # Include local packages & data
-    for folder in ["docs", "dsp", "ui", "core"]:
+    for folder in ["docs", "dsp", "ui", "core", "tools"]:
         folder_path = os.path.join(ROOT_DIR, folder)
         if os.path.isdir(folder_path):
             cmd.extend(["--add-data", f"{folder_path};{folder}"])
 
     cmd.append(ENTRY_POINT)
 
-    print(f"[BUILD] Running PyInstaller: {' '.join(cmd)}")
+    print(f"[BUILD] Running PyInstaller: {' '.join(cmd)}", flush=True)
     res = subprocess.run(cmd, cwd=ROOT_DIR)
     if res.returncode != 0:
-        print("[ERROR] PyInstaller build failed.")
+        print("[ERROR] PyInstaller build failed.", flush=True)
         return False
 
-    built_exe = os.path.join(DIST_DIR, "VoiceTTSr", "VoiceTTSr.exe")
+    built_exe = os.path.join(DIST_DIR, "VoiceTTSr.exe")
     if os.path.isfile(built_exe):
         target_exe = os.path.join(ROOT_DIR, "VoiceTTSr.exe")
         try:
             shutil.copy2(built_exe, target_exe)
-            print(f"\n[SUCCESS] Compiled Launcher ready at: {target_exe}")
+            print(f"\n[SUCCESS] Compiled Launcher ready at: {target_exe}", flush=True)
         except Exception:
-            print(f"\n[SUCCESS] Compiled Launcher ready at: {built_exe}")
+            print(f"\n[SUCCESS] Compiled Launcher ready at: {built_exe}", flush=True)
         return True
 
     print("[WARN] Built executable not located at expected path.")

@@ -139,21 +139,65 @@ def create_portable_zip():
     print(f"Archive ready at: {ZIP_PATH}", flush=True)
 
 
+import subprocess
+from tools.build_launcher import build_executable
+
+def compile_installer():
+    iscc_path = shutil.which("iscc") or shutil.which("ISCC")
+    # Also check standard Inno Setup installation paths on Windows
+    if not iscc_path:
+        for p in [
+            r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+            r"C:\Program Files\Inno Setup 6\ISCC.exe",
+        ]:
+            if os.path.isfile(p):
+                iscc_path = p
+                break
+
+    if iscc_path:
+        print(f"\n[INSTALLER] Compiling Inno Setup Installer with: {iscc_path}", flush=True)
+        iss_file = os.path.join(ROOT_DIR, "tools", "VoiceTTSr_installer.iss")
+        res = subprocess.run([iscc_path, iss_file], cwd=ROOT_DIR)
+        if res.returncode == 0:
+            print(f"[SUCCESS] Setup installer compiled at: dist/VoiceTTSr_Setup_v{VERSION}.exe", flush=True)
+            return True
+        else:
+            print("[WARN] Inno Setup compilation returned non-zero code.", flush=True)
+    else:
+        print("[INFO] Inno Setup (ISCC.exe) not found on system path; skipping installer .exe compilation.", flush=True)
+    return False
+
+
 def main():
     print("=" * 60)
     print(f" VoiceTTSr v{VERSION} — Release Packaging Suite")
     print("=" * 60)
 
     clean_pycache()
+    
+    # 1. Compile native launcher executable (VoiceTTSr.exe)
+    print("\n[STEP 1/3] Compiling Native Windows Launcher...", flush=True)
+    build_executable()
+
+    # 2. Compile Inno Setup Windows Installer if ISCC is present
+    print("\n[STEP 2/3] Building Inno Setup Installer...", flush=True)
+    compile_installer()
+
+    # 3. Create portable zip and release notes
+    print("\n[STEP 3/3] Creating Portable Zip & Release Notes...", flush=True)
     create_portable_zip()
     generate_release_notes()
 
     print("\n" + "=" * 60)
     print(" RELEASE ASSETS READY FOR GITHUB RELEASES")
-    print(f" 1. Binary Archive: dist/{ZIP_NAME}")
-    print(f" 2. Release Notes:  dist/RELEASE_NOTES.md")
+    print(f" 1. Portable Archive: dist/{ZIP_NAME}")
+    if os.path.isfile(os.path.join(DIST_DIR, f"VoiceTTSr_Setup_v{VERSION}.exe")):
+        print(f" 2. Setup Installer:  dist/VoiceTTSr_Setup_v{VERSION}.exe")
+    print(f" 3. Standalone EXE:   dist/VoiceTTSr.exe")
+    print(f" 4. Release Notes:    dist/RELEASE_NOTES.md")
     print("=" * 60)
 
 
 if __name__ == "__main__":
     main()
+
