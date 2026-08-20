@@ -51,12 +51,13 @@ When finishing any development session, refactoring, or feature implementation, 
   * **PyInstaller Subprocess Recursion Prevention**: Implemented `_resolve_python_executable()` and worker startup guards to prevent `VoiceTTSr.exe` from recursively launching itself when virtual environments are uninitialized. Added `multiprocessing.freeze_support()`.
   * **Icon Transparency & UI Spacing**: Replaced icon assets with clean 32-bit multi-resolution RGBA `.ico` and `.png` files (no white corner artifacts). Fixed emoji variation-selector glyph spacing in `ui/components/ethics_dialog.py` for pixel-perfect card headers.
   * **Model Download vs Disk Cache Logging**: Added cache checks across XTTS, Qwen3-TTS, and Chatterbox workers to explicitly notify users when downloading Hugging Face model weights on first use vs loading cached files.
-  * **Installer Finish Screen Enhancements**: Configured `tools/VoiceTTSr_installer.iss` with options to launch the app and optionally initialize AI engine environments on setup completion.
+  * **Installer Finish Screen & CI Pipeline**: Configured `tools/VoiceTTSr_installer.iss` with options to launch the app and optionally initialize AI engine environments on setup completion. Hardened `.github/workflows/release.yml` with dynamic Inno Setup compiler discovery, `icon.png` asset bundling, and pre-release installer integrity checks (`Verify Setup Installer Exists`).
 * **Files Modified / Created**:
   * `voice_cloner_gui.py`
   * `ui/components/ethics_dialog.py`
   * `tools/VoiceTTSr_installer.iss`
   * `tools/package_release.py`
+  * `icon.png` / `icon.ico`
   * `dist/RELEASE_NOTES.md`
   * `.github/workflows/release.yml`
   * `.gitignore`
@@ -64,6 +65,7 @@ When finishing any development session, refactoring, or feature implementation, 
 * **Verification & Testing**:
   * Automated test suite executed: **32/32 tests passed (100%)**.
   * Local Inno Setup and PyInstaller builds verified: generated standalone installer `dist/VoiceTTSr_Setup_v1.7.0.exe` (524 MB).
+  * GitHub Actions CI/CD verified: published `VoiceTTSr_Setup_v1.7.0.exe` (219.06 MB) to official GitHub Releases.
 
 ---
 
