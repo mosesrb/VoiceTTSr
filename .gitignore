@@ -68,7 +68,6 @@ Thumbs.db
 
 # Local Runtime Artifacts
 voicecloner_config.json
-icon.png
 create_shortcut.ps1
 .temp_ag_kit/
 .agent/
