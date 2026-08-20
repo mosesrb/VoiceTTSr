@@ -23,38 +23,64 @@ def log(text, level="info"):
 def normalize_wav(path):
     """Ensure WAV is Mono 24kHz; fix in-place if needed. Returns True if ok."""
     try:
-        from pydub import AudioSegment
-        audio = AudioSegment.from_file(path)
-        if audio.frame_rate != 24000 or audio.channels != 1 or audio.sample_width != 2:
-            log(f"Normalizing → Mono 24kHz: {os.path.basename(path)}", "warn")
-            audio = (audio
-                     .set_channels(1)
-                     .set_frame_rate(24000)
-                     .set_sample_width(2))
-            audio.export(path, format="wav")
-        return True
+        try:
+            from pydub import AudioSegment
+            audio = AudioSegment.from_file(path)
+            if audio.frame_rate != 24000 or audio.channels != 1 or audio.sample_width != 2:
+                log(f"Normalizing → Mono 24kHz: {os.path.basename(path)}", "warn")
+                audio = (audio
+                         .set_channels(1)
+                         .set_frame_rate(24000)
+                         .set_sample_width(2))
+                audio.export(path, format="wav")
+            return True
+        except ImportError:
+            import soundfile as sf
+            import numpy as np
+            from scipy.signal import resample_poly
+            from math import gcd
+            data, sr = sf.read(path)
+            if data.ndim > 1:
+                data = data.mean(axis=1)
+            if sr != 24000:
+                g = gcd(sr, 24000)
+                data = resample_poly(data, 24000 // g, sr // g)
+            sf.write(path, np.asarray(data, dtype=np.float32), 24000, subtype="PCM_16")
+            return True
     except Exception as e:
         log(f"Could not normalize {path}: {e}", "error")
         return False
 
 
 def post_process_audio(path):
-    """Option A: Pro-audio enhancer for output."""
+    """Option A: Pro-audio enhancer for output (75Hz High-pass + -1.5dB Peak Normalization)."""
     try:
-        from pydub import AudioSegment, effects
         log(f"Applying pro-audio post-processing: {os.path.basename(path)}")
-        audio = AudioSegment.from_file(path)
-        
-        # 1. Subtle High-pass filter (75Hz instead of 100Hz)
-        # 75Hz removes low-end "mud" without making the voice sound like an old radio.
-        audio = audio.high_pass_filter(75)
-        
-        # 2. Final Normalization to -1.5dB
-        # This ensures it's loud and clear without EVER clipping (the VLC distortion issue).
-        audio = effects.normalize(audio, headroom=1.5)
-
-        audio.export(path, format="wav")
-        return True
+        try:
+            from pydub import AudioSegment, effects
+            audio = AudioSegment.from_file(path)
+            # 1. Subtle High-pass filter (75Hz instead of 100Hz)
+            # 75Hz removes low-end "mud" without making the voice sound like an old radio.
+            audio = audio.high_pass_filter(75)
+            # 2. Final Normalization to -1.5dB
+            # This ensures it's loud and clear without EVER clipping (the VLC distortion issue).
+            audio = effects.normalize(audio, headroom=1.5)
+            audio.export(path, format="wav")
+            return True
+        except ImportError:
+            # High-fidelity fallback using soundfile + scipy (zero external pydub dependency)
+            import soundfile as sf
+            import numpy as np
+            from scipy.signal import butter, sosfilt
+            data, sr = sf.read(path)
+            sos = butter(2, 75, btype="highpass", fs=sr, output="sos")
+            filtered = sosfilt(sos, data)
+            peak = np.max(np.abs(filtered))
+            if peak > 0:
+                target_peak = 10.0 ** (-1.5 / 20.0)
+                filtered = filtered * (target_peak / peak)
+            sf.write(path, np.asarray(filtered, dtype=np.float32), sr, subtype="PCM_16")
+            return True
     except Exception as e:
         log(f"Post-processing failed: {e}", "error")
         return False
@@ -210,8 +236,16 @@ def main():
                         try:
                             # Load with weights_only=True for secure tensor loading
                             data = torch.load(profile_path, map_location=device, weights_only=True)
-                        except Exception:
-                            data = torch.load(profile_path, map_location=device)
+                        except Exception as load_err:
+                            if cmd.get("allow_insecure", False):
+                                log(f"WARNING: Loading unverified profile '{os.path.basename(profile_path)}' with weights_only=False", "warn")
+                                data = torch.load(profile_path, map_location=device, weights_only=False)
+                            else:
+                                raise ValueError(
+                                    f"Security rejection: Profile '{os.path.basename(profile_path)}' failed safe tensor verification ({load_err}). "
+                                    "To prevent arbitrary code execution, unconstrained unpickling is blocked by default. "
+                                    "Please re-export this voice profile in .safetensors format."
+                                )
                             
                     if not data or "gpt_cond_latent" not in data or "speaker_embedding" not in data:
                         raise ValueError("Invalid voice profile: missing conditioning latents.")

@@ -24,6 +24,19 @@ references/chatterbox/*
 Profiles/*
 !Profiles/.gitkeep
 
+# Global Catch for Audio, Profiles & Generated Mod Assets (any folder)
+*.wav
+*.mp3
+*.flac
+*.ogg
+*.m4a
+*.safetensors
+*.cbprof
+*.fuz
+*.xwm
+*.lip
+!docs/assets/**
+
 # Private Assets (Entirely Excluded)
 voice_files/
 _backup/
@@ -65,10 +78,20 @@ CLAUDE.md
 MEMORIES.md
 KNOWLEDGE.md
 
-# Dev & Planning Artifacts
+# Dev, Documentation & Planning Artifacts
+docs/archive/
 docs/architecture-design.md
 docs/memories.md
+docs/worklogs.md
 docs/project-status.md
 docs/project_status.md
 docs/Universal_Software_Audit_Prompt.md
+
+# Packaging & Build Artifacts
+build/
+dist/
+*.spec
+VoiceTTSr.exe
+
+
 

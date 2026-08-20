@@ -1,17 +1,39 @@
 import os
 import subprocess
 import struct
+import sys
+import shutil
 from pydub import AudioSegment
 
 class SkyrimConverter:
     """
     Utility to handle the Skyrim SE Voice Pipeline.
     Requires FaceFXWrapper.exe, xwmaencode.exe, and FonixData.cdf.
+    Supports native Windows and Linux/macOS via Wine.
     """
     def __init__(self, facefx_path, xwma_path, fonix_path):
         self.facefx_exe = facefx_path
         self.xwma_exe = xwma_path
         self.fonix_data = fonix_path
+
+    def _build_command(self, exe_path: str, *args: str):
+        """
+        Build cross-platform execution command.
+        On Windows, invokes the .exe directly.
+        On Linux/macOS, invokes via Wine if installed, or raises an actionable error.
+        """
+        cmd_args = list(args)
+        if sys.platform == "win32":
+            return [exe_path] + cmd_args
+        
+        wine_bin = shutil.which("wine")
+        if wine_bin:
+            return [wine_bin, exe_path] + cmd_args
+        
+        raise RuntimeError(
+            f"Windows executable '{os.path.basename(exe_path)}' requires Wine to run on {sys.platform}. "
+            "Please install wine (e.g. 'sudo apt install wine' or 'brew install --cask wine-stable') and try again."
+        )
 
     def preprocess_wav(self, input_path, output_path):
         """Force 44.1kHz, 16-bit, Mono PCM for Skyrim compatibility."""
@@ -54,9 +76,7 @@ class SkyrimConverter:
 
         clean_text = self.sanitize_dialogue_text(text)
         # FaceFXWrapper [Type] [Lang] [FonixDataPath] [WavPath] [LipPath] [Text]
-        # We use the 'Skip Resample' mode by providing a pre-processed 16kHz or 44kHz wav
-        # Note: FaceFX often prefers 16kHz internally, but the wrapper handles it.
-        cmd = [
+        cmd = self._build_command(
             self.facefx_exe,
             "Skyrim",
             "USEnglish",
@@ -64,12 +84,11 @@ class SkyrimConverter:
             wav_path,
             output_lip_path,
             clean_text
-        ]
+        )
         
         # Run subprocess
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
-            # FaceFXWrapper can be picky about text length/format
             raise Exception(f"FaceFX failed (Code {result.returncode}): {result.stderr or result.stdout}")
         
         if not os.path.exists(output_lip_path):
@@ -82,8 +101,7 @@ class SkyrimConverter:
         if not os.path.exists(self.xwma_exe):
             raise FileNotFoundError(f"xwmaencode.exe not found at {self.xwma_exe}")
 
-        # Basic usage: xwmaencode.exe input.wav output.xwm
-        cmd = [self.xwma_exe, wav_path, output_xwm_path]
+        cmd = self._build_command(self.xwma_exe, wav_path, output_xwm_path)
         
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:

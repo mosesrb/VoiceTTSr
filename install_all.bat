@@ -33,7 +33,7 @@ if not exist "xtts-env-py310" (
     python -m venv xtts-env-py310
 )
 xtts-env-py310\Scripts\python.exe -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu118
-xtts-env-py310\Scripts\python.exe -m pip install TTS==0.22.0 transformers==4.37.2
+xtts-env-py310\Scripts\python.exe -m pip install TTS==0.22.0 transformers==4.37.2 pydub soundfile
 
 :: 4. Setup Qwen3-TTS Environment
 echo.
@@ -42,7 +42,7 @@ if not exist "qwen-env-py310" (
     python -m venv qwen-env-py310
 )
 qwen-env-py310\Scripts\python.exe -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu118
-qwen-env-py310\Scripts\python.exe -m pip install qwen-tts soundfile accelerate transformers huggingface-hub librosa
+qwen-env-py310\Scripts\python.exe -m pip install qwen-tts soundfile accelerate transformers huggingface-hub librosa pydub
 
 :: 5. Setup RVC v2 Environment
 echo.

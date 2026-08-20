@@ -200,8 +200,16 @@ def main():
                     except Exception:
                         try:
                             loaded = torch.load(profile_pth, map_location=device, weights_only=True)
-                        except Exception:
-                            loaded = torch.load(profile_pth, map_location=device)
+                        except Exception as load_err:
+                            if cmd.get("allow_insecure", False):
+                                log(f"WARNING: Loading unverified profile '{os.path.basename(profile_pth)}' with weights_only=False", "warn")
+                                loaded = torch.load(profile_pth, map_location=device, weights_only=False)
+                            else:
+                                raise ValueError(
+                                    f"Security rejection: Profile '{os.path.basename(profile_pth)}' failed safe tensor verification ({load_err}). "
+                                    "To prevent arbitrary code execution, unconstrained unpickling is blocked by default. "
+                                    "Please re-export this voice profile in .safetensors format."
+                                )
                         if isinstance(loaded, dict) and "avg_emb" in loaded:
                             avg_emb = loaded["avg_emb"]
                         else:

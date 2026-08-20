@@ -76,3 +76,13 @@ class TestDspPackage:
 
             apply_presence_eq(in_wav, eq_wav, gain_db=2.0)
             assert os.path.exists(eq_wav)
+
+    def test_xtts_post_process_audio(self):
+        from xtts_worker import post_process_audio
+        with tempfile.TemporaryDirectory() as tmpdir:
+            wav_path = os.path.join(tmpdir, "synth.wav")
+            create_synthetic_wav(wav_path, duration=1.0, volume=0.6)
+            res = post_process_audio(wav_path)
+            assert res is True
+            assert os.path.exists(wav_path)
+

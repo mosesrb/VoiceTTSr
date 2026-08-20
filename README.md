@@ -1,76 +1,83 @@
-# 🎙️ VoiceTTSr
+# VoiceTTSr
 
-![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+[![Python 3.10](https://img.shields.io/badge/Python-3.10-green.svg)](https://www.python.org/)
+[![Platform: Windows](https://img.shields.io/badge/Platform-Windows%2010%2F11-blue.svg)]()
+[![Privacy: 100% Local](https://img.shields.io/badge/Privacy-100%25%20Offline-success.svg)]()
 
-**VoiceTTSr** is a local-first voice synthesis orchestrator designed for creators, modders, and privacy advocates. Instead of relying on cloud-based API credits, it leverages your local GPU to provide professional-grade cloning and emotional acting.
-
-Whether you're generating thousands of lines for a Skyrim mod or crafting a custom persona for a private assistant, VoiceTTSr provides a unified interface for the world's most powerful open-source audio models.
+**VoiceTTSr** is an open-source, local-first voice cloning and speech synthesis studio. It gives creators, modders, and developers a unified desktop interface to generate high-fidelity character voices on their own hardware without cloud subscriptions, API rate limits, or privacy compromises.
 
 ---
 
-## 🎬 How it Looks
+## Key Capabilities
 
-![VoiceTTSr Interface](docs/assets/voicettr.png)
+* **Multi-Engine Synthesis**: Switch seamlessly between **Coqui XTTS v2** (multilingual voice cloning), **Qwen3-TTS** (expressive emotion tags & voice design), and **Chatterbox** (high-speed flow-matching diffusion).
+* **RVC Vocal Re-Skinning**: Integrated Retrieval-based Voice Conversion layer to apply character timbre, pitch shifts, and index matching over synthesized audio.
+* **Bethesda Modding Toolkit**: Generate Bethesda-compliant lip-sync (`.lip`) and automatically pack audio into Skyrim Special Edition `.fuz` voice archives.
+* **100% Offline & Private**: Zero telemetry, zero analytics, and zero cloud calls. All voice latents, recordings, and outputs remain strictly on your local PC.
+* **Audio Health Analyzer**: Built-in FFT spectral analyzer, SNR estimator, DC offset detector, and automated normalization to ensure pristine reference audio.
+* **Persistent Voice Profiles**: Save averaged voice embeddings into compact, safe `.safetensors` profile files for instant one-click recall.
 
-## ⚡ The Quick Start
+---
 
+## Quick Start
+
+### Prerequisites
+* **OS**: Windows 10 / 11 (64-bit)
+* **GPU**: NVIDIA GPU with at least 6–8 GB VRAM (CUDA 11.8+ supported)
+* **Python**: Python 3.10 installed with "Add Python to PATH" enabled
+
+### 1. Clone & Setup
 ```bash
 git clone https://github.com/mosesrb/VoiceTTSr.git
 cd VoiceTTSr
-install_all.bat  # Sets up isolated environments
-VoiceTTSr.bat    # Launches the GUI
+install_all.bat
+```
+
+### 2. Launch Studio
+Double-click `VoiceTTSr.bat` or run:
+```bash
+VoiceTTSr.bat
 ```
 
 ---
 
-## 🛠️ The Tech Behind the Voice
+## Supported Neural Engines
 
-We didn't just wrap a few models; we built a stable orchestration layer for production use.
+| Engine | Primary Strength | Supported Languages | Typical VRAM |
+| :--- | :--- | :--- | :--- |
+| **Coqui XTTS v2** | High-fidelity voice cloning from short reference audio | 17 Languages | ~4.0 GB |
+| **Qwen3-TTS** | Emotional acting & expressive styles (`[whisper]`, `[angry]`, etc.) | 10 Languages | ~6.0 GB |
+| **Chatterbox** | Ultra-fast diffusion speech synthesis with exaggeration control | English | ~1.5 GB |
+| **RVC v2** | Post-conversion timbre enhancement and character tuning | Universal | ~2.0 GB |
 
-### 🤖 Multi-Engine Worker System
-Dependency conflicts are the death of local AI. VoiceTTSr uses a **Modular Worker Architecture**:
-- Each engine (XTTS, Qwen, Chatterbox, RVC) operates in its own isolated Conda environment.
-- Communication happens over a structured JSON protocol via subprocess pipes.
-- This ensures that updating one model never breaks the others.
+---
 
-```mermaid
-graph TD;
-    GUI[Unified GUI Controller] --> Master[Process Orchestrator];
-    Master --> XW[XTTS Worker];
-    Master --> QW[Qwen Worker];
-    Master --> CW[Chatterbox Worker];
-    Master --> RW[RVC Enhancement];
-    XW & QW & CW & RW --> Out[High-Quality WAV];
+## Architecture
+
+VoiceTTSr uses a **Modular Subprocess Worker Architecture**. The main Tkinter desktop GUI orchestrates independent worker processes over standard JSON-lines IPC. Each engine operates inside its own isolated Python environment, preventing library conflicts between differing PyTorch, CUDA, and transformer versions.
+
+```
+┌──────────────────────────────────────────────────────────┐
+│              VoiceTTSr Studio (Tkinter GUI)              │
+└────────────┬─────────────┬─────────────┬─────────────┬───┘
+             │ (IPC)       │ (IPC)       │ (IPC)       │ (IPC)
+             ▼             ▼             ▼             ▼
+      ┌────────────┐┌────────────┐┌────────────┐┌────────────┐
+      │XTTS Worker ││Qwen Worker ││Chatterbox  ││RVC Worker  │
+      │ (xtts-env) ││ (qwen-env) ││ (cb-env)   ││ (rvc-env)  │
+      └────────────┘└────────────┘└────────────┘└────────────┘
 ```
 
-### 🎭 Emotional Acting (Qwen3-TTS)
-Unlike standard TTS that sounds "robotic," our Qwen integration supports native emotional tagging. You can force the model into *Seductive*, *Aggressive*, or *Warm* tones without complex prompt engineering.
+---
 
-### ⚡ Ultra-Fast Iteration (Chatterbox)
-For high-speed tasks, we've integrated **Chatterbox** with a proprietary flow-matching config. It bypasses the standard 1000-step diffusion process, capping it at 40 steps for near-instant audio generation with minimal quality loss.
+## Ethical Use & Guidelines
 
-### 🎯 Pro-Level Finishing (RVC)
-Synthesized audio is often "dry." We include an integrated **RVC (Retrieval-based Voice Conversion)** layer to "re-skin" the output WAV, injecting the specific vocal texture and artifacts of a target character that pure synthesis often misses.
+VoiceTTSr is built for personal voice cloning, authorized voice acting, and game modding. Users are responsible for ensuring they possess explicit, informed consent for any voice they clone. Unauthorized deepfakes, deceptive impersonation, fraud, or harassment are strictly prohibited. See [docs/VOICE_ETHICS.md](docs/VOICE_ETHICS.md) for details.
 
 ---
 
-## 🧠 Smart Features
+## License & Third-Party Notices
 
-- **Profile Memory**: Saves averaged voice embeddings (.pt, .cbprof) so you can recall a specific "voice" instantly without re-uploading references.
-- **Mumble Guard**: An automated post-processing check that detects digital artifacts or unexpected silence, triggering an auto-retry of the generation.
-- **Modder's Toolkit**: Built-in support for generating Skyrim-compatible `.fuz` files and matching lip-sync phonemes.
-
-## 🛡️ Privacy & Ownership
-
-- **100% Offline**: No telemetry. No "checking for updates" in the middle of a session.
-- **Data Sovereignty**: Your reference audio stays on your disk. Your synthesized voice stays in your VRAM.
-- **Open Source**: Licensed under GPL-v3.
-
----
-
-## 🏗 Installation Note
-Due to various CUDA dependencies, we recommend at least 8GB of VRAM for the best experience. Use `install_all.bat` to handle the heavy lifting of environment creation.
-
----
-
-*Built with ❤️ for the Local AI Community.*
+* VoiceTTSr code is licensed under the [GNU General Public License v3.0](LICENSE).
+* Upstream model weights and binaries operate under their respective licenses (e.g. Coqui CPML non-commercial terms for XTTS v2, Bethesda Creation Kit EULA for modding tools). See [docs/THIRD_PARTY_NOTICES.md](docs/THIRD_PARTY_NOTICES.md) for full attributions.

@@ -172,8 +172,16 @@ for raw in sys.stdin:
             except Exception:
                 try:
                     data = torch.load(profile_path, map_location=DEVICE, weights_only=True)
-                except Exception:
-                    data = torch.load(profile_path, map_location=DEVICE, weights_only=False)
+                except Exception as load_err:
+                    if cmd.get("allow_insecure", False):
+                        _log(f"WARNING: Loading unverified profile '{os.path.basename(profile_path)}' with weights_only=False", "warn")
+                        data = torch.load(profile_path, map_location=DEVICE, weights_only=False)
+                    else:
+                        raise ValueError(
+                            f"Security rejection: Profile '{os.path.basename(profile_path)}' failed safe tensor verification ({load_err}). "
+                            "To prevent arbitrary code execution, unconstrained unpickling is blocked by default. "
+                            "Please re-export this voice profile in .safetensors format."
+                        )
                     
             if data and data.get("version", 0) >= 1:
                 _cached_cond     = data["cond"]
@@ -222,8 +230,16 @@ for raw in sys.stdin:
                     except Exception:
                         try:
                             data = torch.load(profile_path, map_location=DEVICE, weights_only=True)
-                        except Exception:
-                            data = torch.load(profile_path, map_location=DEVICE, weights_only=False)
+                        except Exception as load_err:
+                            if cmd.get("allow_insecure", False):
+                                _log(f"WARNING: Loading unverified profile '{os.path.basename(profile_path)}' with weights_only=False", "warn")
+                                data = torch.load(profile_path, map_location=DEVICE, weights_only=False)
+                            else:
+                                raise ValueError(
+                                    f"Security rejection: Profile '{os.path.basename(profile_path)}' failed safe tensor verification ({load_err}). "
+                                    "To prevent arbitrary code execution, unconstrained unpickling is blocked by default. "
+                                    "Please re-export this voice profile in .safetensors format."
+                                )
                             
                     if data and data.get("version", 0) >= 1:
                         use_cond = data["cond"]
