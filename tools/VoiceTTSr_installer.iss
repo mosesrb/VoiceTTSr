@@ -30,7 +30,7 @@ PrivilegesRequired=lowest
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
 [Files]
 Source: "..\VoiceTTSr.exe"; DestDir: "{app}"; Flags: ignoreversion
@@ -41,11 +41,10 @@ Source: "..\chatterbox_worker.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\rvc_worker.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\skyrim_utils.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\download_resources.py"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\VoiceTTSr.bat"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\install_all.bat"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\install_VoiceTTSr.bat"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\*.bat"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\requirements.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\icon.ico"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\icon.png"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\core\*"; DestDir: "{app}\core"; Flags: ignoreversion recursesubdirs createallsubdirs

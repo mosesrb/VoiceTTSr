@@ -48,22 +48,43 @@ MIN_DUR_SEC     = 3   # min 3s for refs (6s was too strict, caused silent empty-
 CONFIG_FILE     = "voicecloner_config.json"
 VERSION         = "1.7.0"
 
-# ── paths to the two isolated Python envs ─────────────────────────────────
-# XTTS: uses its own venv (transformers==4.36.2, TTS==0.22.0)
-# Qwen:  uses system Python where qwen-tts + transformers==4.57+ are installed
-# Auto-locate Python 3.10 based on environment or system fallback
-_BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
-_XTTS_ENV    = os.path.join(_BASE_DIR, "xtts-env-py310", "Scripts", "python.exe")
-_XTTS_PYTHON = _XTTS_ENV if os.path.isfile(_XTTS_ENV) else sys.executable
+# ── paths to the isolated Python envs ─────────────────────────────────
+import shutil
 
-_QWEN_ENV    = os.path.join(_BASE_DIR, "qwen-env-py310", "Scripts", "python.exe")
-_QWEN_PYTHON = _QWEN_ENV if os.path.isfile(_QWEN_ENV) else sys.executable
+if getattr(sys, "frozen", False):
+    _BASE_DIR = os.path.dirname(sys.executable)
+else:
+    _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-_RVC_ENV     = os.path.join(_BASE_DIR, "rvc-env", "Scripts", "python.exe")
-_RVC_PYTHON  = _RVC_ENV if os.path.isfile(_RVC_ENV) else sys.executable
 
-_CHATTERBOX_ENV    = os.path.join(_BASE_DIR, "chatterbox-env-py311", "Scripts", "python.exe")
-_CHATTERBOX_PYTHON = _CHATTERBOX_ENV if os.path.isfile(_CHATTERBOX_ENV) else sys.executable
+def _resolve_python_executable(env_dir_name: str) -> str:
+    """
+    Resolve the correct python.exe for an engine worker.
+    CRITICAL: Never return VoiceTTSr.exe (sys.executable in frozen mode) as a python interpreter,
+    as that will spawn another recursive GUI instance!
+    """
+    venv_py = os.path.join(_BASE_DIR, env_dir_name, "Scripts", "python.exe")
+    if os.path.isfile(venv_py):
+        return venv_py
+
+    # If running as source script (not compiled exe), sys.executable is the real python.exe
+    if not getattr(sys, "frozen", False):
+        return sys.executable
+
+    # If running as compiled exe, find system python on PATH
+    sys_py = shutil.which("python")
+    if sys_py and os.path.isfile(sys_py):
+        base_name = os.path.basename(sys_py).lower()
+        if "voicettsr" not in base_name and base_name.startswith("python"):
+            return sys_py
+
+    return venv_py
+
+
+_XTTS_PYTHON       = _resolve_python_executable("xtts-env-py310")
+_QWEN_PYTHON       = _resolve_python_executable("qwen-env-py310")
+_CHATTERBOX_PYTHON = _resolve_python_executable("chatterbox-env-py311")
+_RVC_PYTHON        = _resolve_python_executable("rvc-env")
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -90,10 +111,28 @@ class _TtsWorker:
         """Spawn worker subprocess. Calls on_ready() or on_error(msg) when done."""
         if self.is_alive():
             on_ready(); return
+
+        # Guard against recursive self-launch in compiled exe mode
+        if getattr(sys, "frozen", False) and os.path.abspath(self._python).lower() == os.path.abspath(sys.executable).lower():
+            env_name = os.path.basename(os.path.dirname(os.path.dirname(self._python))) or "Python"
+            on_error(
+                f"Worker environment '{env_name}' is not installed.\n\n"
+                "Please run 'install_all.bat' to create and initialize the local Python environments."
+            )
+            return
+
         if not os.path.isfile(self._python):
-            on_error(f"Python not found: {self._python}\nRun setup_qwen_env.bat to create the Qwen env."); return
-        if not os.path.isfile(self._script):
-            on_error(f"Worker script not found: {self._script}"); return
+            env_name = os.path.basename(os.path.dirname(os.path.dirname(self._python)))
+            on_error(
+                f"Python environment not found: {self._python}\n\n"
+                "Please run 'install_all.bat' to create and initialize the local Python environments."
+            )
+            return
+
+        script_path = os.path.join(_BASE_DIR, self._script) if not os.path.isabs(self._script) else self._script
+        if not os.path.isfile(script_path):
+            on_error(f"Worker script not found: {script_path}")
+            return
 
         self._ready_evt.clear()
         self._starting = True
@@ -108,12 +147,13 @@ class _TtsWorker:
             
         worker_env["PYTHONIOENCODING"] = "utf-8"
         self._proc = subprocess.Popen(
-            [self._python, "-u", self._script],
+            [self._python, "-u", script_path],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True, bufsize=1,
             encoding="utf-8",
+            cwd=_BASE_DIR,
             env=worker_env,
         )
         # reader thread
@@ -415,6 +455,15 @@ class VoiceClonerApp(tk.Tk):
         except Exception:
             pass
 
+    def _run_install_all_script(self):
+        """Launch install_all.bat in a visible terminal window to initialize engine virtual environments."""
+        bat_path = os.path.join(_BASE_DIR, "install_all.bat")
+        if os.path.isfile(bat_path):
+            self._log("Launching engine setup installer (install_all.bat)...", WARNING)
+            subprocess.Popen(["cmd.exe", "/c", "start", "cmd.exe", "/k", bat_path], cwd=_BASE_DIR)
+        else:
+            messagebox.showerror("Script Missing", f"install_all.bat was not found at:\n{bat_path}")
+
     # ── UI skeleton ────────────────────────────────────────────────────────
     def _build_ui(self):
         self._apply_styles()
@@ -431,6 +480,8 @@ class VoiceClonerApp(tk.Tk):
                                        bg=DARK_BG, fg=TEXT_SEC)
         self._subtitle_lbl.pack(side="left", pady=4)
         # Action buttons in header
+        self._btn(hdr, "⚡ Setup Engines", self._run_install_all_script,
+                  small=True).pack_configure(side="right", padx=(0, 8))
         self._btn(hdr, "⚖️ Ethics & Privacy", lambda: show_policy_viewer(self),
                   small=True).pack_configure(side="right", padx=(0, 8))
         self._btn(hdr, "🔬 Audio Analyzer", self._open_audio_analyzer,
@@ -2756,32 +2807,42 @@ class VoiceClonerApp(tk.Tk):
 
     def _load_model(self):
         backend = self._backend_var.get()
-        if backend == "xtts":
-            if self._xtts_worker.is_alive():
-                messagebox.showinfo("Model", "XTTS v2 worker already running."); return
-            self._log("Starting XTTS v2 worker (xtts-env-py310)…", WARNING)
-        elif backend == "qwen":
-            if self._qwen_worker.is_alive():
-                messagebox.showinfo("Model", "Qwen3-TTS worker already running."); return
-            if not os.path.isfile(_QWEN_PYTHON):
-                self._log("qwen-env-py310 not found. Run setup_qwen_env.bat first.", DANGER)
-                messagebox.showerror("No Qwen env",
-                    "Run setup_qwen_env.bat to create the Qwen Python environment.")
-                return
-            self._log("Starting Qwen3-TTS worker (qwen-env-py310)…", WARNING)
-        else:  # chatterbox
-            if self._chatterbox_worker.is_alive():
-                messagebox.showinfo("Model", "Chatterbox worker already running."); return
-            if not os.path.isfile(_CHATTERBOX_ENV):
-                self._log("chatterbox-env-py311 not found. Run setup below.", DANGER)
-                messagebox.showerror("No Chatterbox env",
-                    "Create the Chatterbox environment:\n\n"
-                    "conda create -yn chatterbox python=3.11\n"
-                    "conda activate chatterbox\n"
-                    "pip install chatterbox-tts torchaudio soundfile\n\n"
-                    "Then rename/link the env as 'chatterbox-env-py311' in the app folder.")
-                return
-            self._log("Starting Chatterbox worker (chatterbox-env-py311)…", WARNING)
+        worker = {
+            "xtts":        self._xtts_worker,
+            "qwen":        self._qwen_worker,
+            "chatterbox":  self._chatterbox_worker,
+        }[backend]
+
+        if worker.is_alive():
+            messagebox.showinfo("Model", f"{backend.upper()} worker is already running.")
+            return
+
+        # Pre-launch check: verify environment python exists and isn't the frozen GUI exe
+        env_names = {
+            "xtts": "xtts-env-py310",
+            "qwen": "qwen-env-py310",
+            "chatterbox": "chatterbox-env-py311",
+        }
+        env_name = env_names.get(backend, f"{backend}-env")
+
+        if not os.path.isfile(worker._python) or (getattr(sys, "frozen", False) and os.path.abspath(worker._python).lower() == os.path.abspath(sys.executable).lower()):
+            self._log(f"Environment '{env_name}' not found. Please run install_all.bat.", DANGER)
+            ans = messagebox.askyesno(
+                "Environment Not Installed",
+                f"The Python virtual environment for {backend.upper()} was not found:\n\n"
+                f"Missing: {env_name}\n\n"
+                "Would you like to run 'install_all.bat' now to install and set up the AI environments?",
+            )
+            if ans:
+                self._run_install_all_script()
+            return
+
+        env_labels = {
+            "xtts": "XTTS v2 (xtts-env-py310)",
+            "qwen": "Qwen3-TTS (qwen-env-py310)",
+            "chatterbox": "Chatterbox (chatterbox-env-py311)",
+        }
+        self._log(f"Starting {env_labels.get(backend, backend)} worker…", WARNING)
 
         # VRAM Management: Stop other heavyweight workers to avoid CUDA Out of Memory on single GPU
         for other_backend, other_worker in [("xtts", self._xtts_worker), ("qwen", self._qwen_worker), ("chatterbox", self._chatterbox_worker)]:
@@ -2791,11 +2852,6 @@ class VoiceClonerApp(tk.Tk):
 
         self._load_model_btn.config(state="disabled")
         self._set_status("loading model…", WARNING)
-        worker = {
-            "xtts":        self._xtts_worker,
-            "qwen":        self._qwen_worker,
-            "chatterbox":  self._chatterbox_worker,
-        }[backend]
 
         def on_ready():
             labels = {"xtts": "XTTS v2", "qwen": "Qwen3-TTS", "chatterbox": "Chatterbox"}
@@ -3908,5 +3964,7 @@ class VoiceClonerApp(tk.Tk):
 
 # ══════════════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.freeze_support()
     app = VoiceClonerApp()
     app.mainloop()
