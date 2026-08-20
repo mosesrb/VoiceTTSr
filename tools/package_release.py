@@ -148,8 +148,10 @@ def compile_installer():
     # Also check standard Inno Setup installation paths on Windows
     if not iscc_path:
         for p in [
+            os.path.join(ROOT_DIR, "tools", "InnoSetup", "ISCC.exe"),
             r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
             r"C:\Program Files\Inno Setup 6\ISCC.exe",
+            r"C:\Program Files\Inno Setup 7\ISCC.exe",
         ]:
             if os.path.isfile(p):
                 iscc_path = p

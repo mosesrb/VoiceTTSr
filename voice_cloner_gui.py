@@ -371,11 +371,37 @@ class VoiceClonerApp(tk.Tk):
                 on_accept=self._on_ethics_accepted,
                 on_decline=self._on_ethics_declined,
             )
+        else:
+            self.after(200, self._check_fresh_environment)
 
     def _on_ethics_accepted(self):
         self.config_data["ethics_accepted"] = True
         self._save_config()
         self._log("Ethical Use & Privacy Agreement accepted.", ACCENT2)
+        self.after(300, self._check_fresh_environment)
+
+    def _check_fresh_environment(self):
+        """Detect if this is a fresh installation with uninitialized AI engine environments."""
+        has_any_env = (
+            os.path.isfile(_XTTS_ENV) or
+            os.path.isfile(_QWEN_ENV) or
+            os.path.isfile(_CHATTERBOX_ENV)
+        )
+        if not has_any_env:
+            self._log("Fresh installation detected: AI engine environments not yet initialized.", WARNING)
+            self._log("Click '⚡ Setup Engines' in the top header anytime to run install_all.bat.", ACCENT)
+            if not self.config_data.get("setup_prompted", False):
+                self.config_data["setup_prompted"] = True
+                self._save_config()
+                ans = messagebox.askyesno(
+                    "Initial Setup — Initialize AI Engines",
+                    "Welcome to VoiceTTSr Studio!\n\n"
+                    "We detected that the AI engine virtual environments have not been set up yet.\n\n"
+                    "Would you like to run 'Setup Engines' now?\n\n"
+                    "(This will open a terminal window to configure PyTorch and your local engine environments).",
+                )
+                if ans:
+                    self._run_install_all_script()
 
     def _on_ethics_declined(self):
         self._on_close()
@@ -459,7 +485,8 @@ class VoiceClonerApp(tk.Tk):
         """Launch install_all.bat in a visible terminal window to initialize engine virtual environments."""
         bat_path = os.path.join(_BASE_DIR, "install_all.bat")
         if os.path.isfile(bat_path):
-            self._log("Launching engine setup installer (install_all.bat)...", WARNING)
+            self._log("⚡ Starting AI engine setup in terminal (install_all.bat)...", WARNING)
+            self._log("Please monitor the setup terminal as PyTorch and engine dependencies download.", TEXT_SEC)
             subprocess.Popen(["cmd.exe", "/c", "start", "cmd.exe", "/k", bat_path], cwd=_BASE_DIR)
         else:
             messagebox.showerror("Script Missing", f"install_all.bat was not found at:\n{bat_path}")

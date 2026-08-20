@@ -193,16 +193,17 @@ def show_first_run_agreement(parent: tk.Tk, on_accept, on_decline) -> tk.Topleve
     content = tk.Frame(dlg, bg=DARK_BG)
     content.pack(fill="both", expand=True, padx=24, pady=5)
 
+    # Helper to build consistent, clean card header rows without emoji-spacing glitches
+    def _add_card_header(parent, icon, title, fg_color, font_size=11):
+        f = tk.Frame(parent, bg=CARD_BG)
+        f.pack(anchor="w", padx=14, pady=(8, 3))
+        tk.Label(f, text=icon, font=("Segoe UI Emoji", font_size), bg=CARD_BG, fg=fg_color).pack(side="left")
+        tk.Label(f, text=title, font=("Segoe UI", font_size, "bold"), bg=CARD_BG, fg=fg_color).pack(side="left", padx=(8, 0))
+
     # Card 1: Local Privacy
     c1 = tk.Frame(content, bg=CARD_BG, highlightbackground=BORDER, highlightthickness=1)
-    c1.pack(fill="x", pady=6, ipady=4)
-    tk.Label(
-        c1,
-        text="🔒  100% Offline & Local Privacy Guarantee",
-        font=("Segoe UI", 11, "bold"),
-        bg=CARD_BG,
-        fg=ACCENT2,
-    ).pack(anchor="w", padx=14, pady=(8, 2))
+    c1.pack(fill="x", pady=5, ipady=3)
+    _add_card_header(c1, "🔒", "100% Offline & Local Privacy Guarantee", ACCENT2, 11)
     tk.Label(
         c1,
         text="All voice models, audio synthesis, and cloned profiles run strictly on your local PC hardware.\nZero telemetry, zero audio, and zero prompts are ever sent to external cloud servers.",
@@ -214,14 +215,8 @@ def show_first_run_agreement(parent: tk.Tk, on_accept, on_decline) -> tk.Topleve
 
     # Card 2: Voice Cloning Consent & Responsibility
     c2 = tk.Frame(content, bg=CARD_BG, highlightbackground=BORDER, highlightthickness=1)
-    c2.pack(fill="x", pady=6, ipady=4)
-    tk.Label(
-        c2,
-        text="🎙️  Voice Cloning Consent & Ethical Use",
-        font=("Segoe UI", 11, "bold"),
-        bg=CARD_BG,
-        fg=ACCENT3,
-    ).pack(anchor="w", padx=14, pady=(8, 2))
+    c2.pack(fill="x", pady=5, ipady=3)
+    _add_card_header(c2, "🎙", "Voice Cloning Consent & Ethical Use", ACCENT3, 11)
     tk.Label(
         c2,
         text="You agree to only clone voices that you own or have explicit, informed permission to replicate.\nUnauthorized deepfakes, fraud, defamation, harassment, and deceptive impersonation are strictly prohibited.",
@@ -234,13 +229,7 @@ def show_first_run_agreement(parent: tk.Tk, on_accept, on_decline) -> tk.Topleve
     # Card 3: Upstream Licensing
     c3 = tk.Frame(content, bg=CARD_BG, highlightbackground=BORDER, highlightthickness=1)
     c3.pack(fill="x", pady=5, ipady=3)
-    tk.Label(
-        c3,
-        text="⚖️  Upstream Model Licensing & Watermarking",
-        font=("Segoe UI", 10, "bold"),
-        bg=CARD_BG,
-        fg=TEXT_SEC,
-    ).pack(anchor="w", padx=14, pady=(6, 2))
+    _add_card_header(c3, "⚖", "Upstream Model Licensing & Watermarking", TEXT_SEC, 10)
     tk.Label(
         c3,
         text="• Coqui XTTS v2 is governed by the Coqui Public Model License (CPML — non-commercial use only).\n• Chatterbox TTS embeds an imperceptible audio watermark (Perth watermarker) by design.\n• Bethesda Skyrim modding utilities require user-sourced Creation Kit assets.",
@@ -253,13 +242,7 @@ def show_first_run_agreement(parent: tk.Tk, on_accept, on_decline) -> tk.Topleve
     # Card 4: First-Run Model Download Notice
     c4 = tk.Frame(content, bg=CARD_BG, highlightbackground=BORDER, highlightthickness=1)
     c4.pack(fill="x", pady=5, ipady=3)
-    tk.Label(
-        c4,
-        text="⚡  First-Launch Model Downloads & Initialization",
-        font=("Segoe UI", 10, "bold"),
-        bg=CARD_BG,
-        fg=WARNING,
-    ).pack(anchor="w", padx=14, pady=(6, 2))
+    _add_card_header(c4, "⚡", "First-Launch Model Downloads & Initialization", WARNING, 10)
     tk.Label(
         c4,
         text="On first launch or engine switch, required AI model weights are downloaded locally.\nInitial download times vary based on your internet connection. Once downloaded, all synthesis runs 100% offline.",
