@@ -22,8 +22,15 @@ jobs:
 
       - name: Install Inno Setup Compiler
         run: |
-          choco install innosetup --no-progress
-          echo "C:\Program Files (x86)\Inno Setup 6" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          choco install innosetup --no-progress -y
+          $iscc_dir = (Get-ChildItem -Path "C:\Program Files", "C:\Program Files (x86)", "C:\tools", "C:\ProgramData\chocolatey" -Filter "ISCC.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1).DirectoryName
+          if ($iscc_dir) {
+            Write-Host "Found ISCC.exe in: $iscc_dir"
+            echo $iscc_dir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          } else {
+            Write-Error "ISCC.exe not found after installing innosetup!"
+            exit 1
+          }
 
       - name: Install Python Build Dependencies
         run: |
@@ -33,6 +40,15 @@ jobs:
       - name: Build Executable & Package Release
         run: |
           python tools/package_release.py
+
+      - name: Verify Setup Installer Exists
+        run: |
+          $installer = Get-ChildItem -Path "dist" -Filter "VoiceTTSr_Setup_*.exe" -ErrorAction SilentlyContinue
+          if (-not $installer) {
+            Write-Error "CRITICAL: VoiceTTSr_Setup installer was not generated in dist/!"
+            exit 1
+          }
+          Write-Host "Installer verified successfully: $($installer.FullName) ($([math]::Round($installer.Length / 1MB, 2)) MB)"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

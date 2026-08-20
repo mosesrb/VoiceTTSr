@@ -151,7 +151,10 @@ def compile_installer():
             os.path.join(ROOT_DIR, "tools", "InnoSetup", "ISCC.exe"),
             r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
             r"C:\Program Files\Inno Setup 6\ISCC.exe",
+            r"C:\Program Files (x86)\Inno Setup 7\ISCC.exe",
             r"C:\Program Files\Inno Setup 7\ISCC.exe",
+            r"C:\tools\InnoSetup\ISCC.exe",
+            r"C:\ProgramData\chocolatey\lib\InnoSetup\tools\ISCC.exe",
         ]:
             if os.path.isfile(p):
                 iscc_path = p
@@ -161,13 +164,18 @@ def compile_installer():
         print(f"\n[INSTALLER] Compiling Inno Setup Installer with: {iscc_path}", flush=True)
         iss_file = os.path.join(ROOT_DIR, "tools", "VoiceTTSr_installer.iss")
         res = subprocess.run([iscc_path, iss_file], cwd=ROOT_DIR)
-        if res.returncode == 0:
-            print(f"[SUCCESS] Setup installer compiled at: dist/VoiceTTSr_Setup_v{VERSION}.exe", flush=True)
+        installer_out = os.path.join(DIST_DIR, f"VoiceTTSr_Setup_v{VERSION}.exe")
+        if res.returncode == 0 and os.path.isfile(installer_out):
+            print(f"[SUCCESS] Setup installer compiled at: {installer_out}", flush=True)
             return True
         else:
-            print("[WARN] Inno Setup compilation returned non-zero code.", flush=True)
+            print("[ERROR] Inno Setup compilation failed or installer not created.", flush=True)
+            if os.environ.get("GITHUB_ACTIONS") or os.environ.get("CI"):
+                sys.exit(1)
     else:
-        print("[INFO] Inno Setup (ISCC.exe) not found on system path; skipping installer .exe compilation.", flush=True)
+        print("[WARN] Inno Setup (ISCC.exe) not found on system path.", flush=True)
+        if os.environ.get("GITHUB_ACTIONS") or os.environ.get("CI"):
+            sys.exit(1)
     return False
 
 
