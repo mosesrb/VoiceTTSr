@@ -97,3 +97,8 @@ tools/*.exe
 
 
 
+
+# Project Directives Clean Split (Private Vault)
+.project/
+docs/internal/
+
