@@ -19,7 +19,7 @@ echo [1/5] Setting up GUI Environment (gui-env)...
 if not exist "gui-env" (
     python -m venv gui-env
 )
-gui-env\Scripts\python.exe -m pip install -r requirements.txt
+gui-env\Scripts\python.exe -m pip install -r requirements-dev.txt
 if %errorlevel% neq 0 (
     echo [ERROR] Failed to install GUI dependencies. Check your internet connection.
     pause

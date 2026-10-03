@@ -1,0 +1,4 @@
+# VoiceTTSr Development & Test Dependencies
+# Pinned for reproducible test runner execution in gui-env
+-r requirements.txt
+pytest>=8.0.0
