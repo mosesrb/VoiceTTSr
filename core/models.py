@@ -16,6 +16,7 @@ class GenerationJob:
     custom_filename: str = ""
     job_mood: str = ""
     status_label_id: Optional[Any] = None
+    play_button_id: Optional[Any] = None
 
 
 @dataclass(frozen=True)
@@ -53,6 +54,10 @@ class EngineParameters:
     profile_path: Optional[str] = None
     ref_wavs: List[str] = field(default_factory=list)
     xtts_audio_pro: bool = False
+    naming_mode: str = "Standard"
+    stream: bool = False
+    retry_mumble: bool = False
+    emotion_tags: bool = False
 
 
 @dataclass(frozen=True)

@@ -33,6 +33,14 @@ from datetime import datetime
 import re
 from skyrim_utils import SkyrimConverter
 from dsp import normalize_to_wav, get_audio_duration, analyze_audio_file, apply_presence_eq, apply_highpass
+from core import (
+    GenerationJob,
+    EngineParameters,
+    RvcParameters,
+    GenerationContext,
+    save_config_atomic,
+    load_config_safe,
+)
 
 # ── pydub lazy import (only used for ref WAV normalization in the GUI) ──────
 def _import_pydub():
@@ -417,13 +425,7 @@ class VoiceClonerApp(tk.Tk):
 
     # ── config ─────────────────────────────────────────────────────────────
     def _load_config(self):
-        self.config_data = {}
-        if os.path.exists(CONFIG_FILE):
-            try:
-                with open(CONFIG_FILE) as f:
-                    self.config_data = json.load(f)
-            except Exception:
-                pass
+        self.config_data = load_config_safe(CONFIG_FILE, {})
 
     def _save_config(self):
         try:
@@ -476,8 +478,7 @@ class VoiceClonerApp(tk.Tk):
             d["skyrim_fonix_path"]    = self._skyrim_fonix_path.get()
             if self._profile_path:
                 d["profile_path"] = self._profile_path
-            with open(CONFIG_FILE, "w") as f:
-                json.dump(d, f, indent=2)
+            save_config_atomic(CONFIG_FILE, d)
         except Exception:
             pass
 
@@ -3052,8 +3053,16 @@ class VoiceClonerApp(tk.Tk):
 
         jobs = []
         for i, (var, st, sv, nv, pb, sk, sp) in enumerate(self._job_entries, 1):
-            if var.get().strip():
-                jobs.append((i, var.get().strip(), st, sv.get(), nv.get().strip()))
+            text = var.get().strip()
+            if text:
+                jobs.append(GenerationJob(
+                    index=i,
+                    text=text,
+                    custom_filename=nv.get().strip(),
+                    job_mood=sv.get(),
+                    status_label_id=st,
+                    play_button_id=pb,
+                ))
 
         if not jobs:
             messagebox.showwarning("No text", "Enter at least one text job."); return
@@ -3078,28 +3087,6 @@ class VoiceClonerApp(tk.Tk):
                                f"using default folder '{out_dir}' instead.", DANGER)
         
         os.makedirs(out_dir, exist_ok=True)
-        self._stop_generation.clear()
-        self._skip_job_event.clear()
-        self._skip_batch_event.clear()
-        self._stop_batch_event.clear()
-        
-        self._gen_btn.config(state="disabled")
-        self._stop_btn.config(state="normal")
-        self._skip_batch_btn.config(state="normal")
-        self._stop_batch_btn.config(state="normal")
-
-        threading.Thread(target=self._run_generation,
-                         args=(batches, out_dir), daemon=True).start()
-
-    def _run_generation(self, batches, out_dir):
-        import re
-        backend = self._backend_var.get()
-        worker  = {"xtts": self._xtts_worker,
-                   "qwen": self._qwen_worker,
-                   "chatterbox": self._chatterbox_worker}[backend]
-
-        total_jobs = sum(len(b) for b in batches)
-        processed_count = 0
 
         profile_path = None
         valid_wavs, skipped = [], []
@@ -3112,7 +3099,7 @@ class VoiceClonerApp(tk.Tk):
                 valid_wavs, skipped = self._get_ref_wavs()
                 if not valid_wavs:
                     self._log("No valid XTTS references found.", DANGER)
-                    self.after(0, lambda: self._gen_btn.config(state="normal")); return
+                    return
                 self._log(f"XTTS v2 — {len(valid_wavs)} ref(s), {len(skipped)} skipped.", ACCENT)
         elif backend == "qwen":
             profile_path = self._qwen_profile_pth
@@ -3122,7 +3109,7 @@ class VoiceClonerApp(tk.Tk):
                 valid_wavs, skipped = self._get_ref_wavs()
                 if not valid_wavs:
                     self._log("No valid Qwen references found.", DANGER)
-                    self.after(0, lambda: self._gen_btn.config(state="normal")); return
+                    return
                 self._log(f"QWEN — {len(valid_wavs)} ref(s), {len(skipped)} skipped.", ACCENT)
         else:  # chatterbox
             valid_wavs, skipped = self._get_ref_wavs()
@@ -3133,47 +3120,153 @@ class VoiceClonerApp(tk.Tk):
             # Pass CB profile path so worker can use cached conditioning
             profile_path = self._cb_profile_path
 
-        # Pull settings from the right backend vars
+        # Snapshot settings from backend vars on the main thread
         if backend == "qwen":
             speed = 1.0
-            temp  = self.qwen_temp_var.get()
-            rep   = self.qwen_rep_pen_var.get()
+            temp  = float(self.qwen_temp_var.get())
+            rep   = float(self.qwen_rep_pen_var.get())
             top_k = int(self.qwen_top_k_var.get())
-            top_p = self.qwen_top_p_var.get()
-            active_presets = QWEN_PRESETS
+            top_p = float(self.qwen_top_p_var.get())
         elif backend == "chatterbox":
             speed = 1.0; rep = 1.0; top_k = 50; top_p = 1.0  # unused dummies
-            temp  = self._chatterbox_temp_var.get()
-            active_presets = CHATTERBOX_PRESETS
+            temp  = float(self._chatterbox_temp_var.get())
         else:  # xtts
-            speed = self.xtts_speed_var.get()
-            temp  = self.xtts_temp_var.get()
-            rep   = self.xtts_rep_pen_var.get()
+            speed = float(self.xtts_speed_var.get())
+            temp  = float(self.xtts_temp_var.get())
+            rep   = float(self.xtts_rep_pen_var.get())
             top_k = int(self.xtts_top_k_var.get())
-            top_p = self.xtts_top_p_var.get()
-            active_presets = XTTS_PRESETS
+            top_p = float(self.xtts_top_p_var.get())
 
         lang  = self._lang_map.get(self.lang_var.get(), self.lang_var.get())
         global_preset = self._active_preset.get() or "Natural"
-        use_icl = self._qwen_voice_design.get()
+        use_icl = bool(self._qwen_voice_design.get())
 
-        self._gen_progress["maximum"] = total_jobs
-        self._gen_progress["value"]   = 0
+        engine_params = EngineParameters(
+            backend=backend,
+            language=lang,
+            speed=speed,
+            temperature=temp,
+            repetition_penalty=rep,
+            top_k=top_k,
+            top_p=top_p,
+            exaggeration=float(self._chatterbox_exagg_var.get()),
+            cfg_weight=float(self._chatterbox_cfg_var.get()),
+            max_steps=int(self._chatterbox_steps_var.get()),
+            global_preset=global_preset,
+            use_icl=use_icl,
+            profile_path=profile_path,
+            ref_wavs=valid_wavs,
+            xtts_audio_pro=bool(self._xtts_audio_pro.get()),
+            naming_mode=str(self._naming_mode.get()),
+            stream=bool(self._qwen_stream.get()),
+            retry_mumble=bool(self._qwen_retry_mumble.get()),
+            emotion_tags=bool(self._qwen_emotion_tags.get()),
+        )
 
         rvc_on = (backend == "xtts" and self._rvc_enabled.get()
                   and self._rvc_worker.is_alive()
                   and bool(self._rvc_model_var.get()))
-        xtts_pro = self._xtts_audio_pro.get()
+        auto_rvc = bool(self._rvc_auto_var.get())
+        auto_scope = str(self._rvc_auto_scope.get())
 
-        # If Auto-RVC is on and scope=global, resolve once before the loop
-        if (rvc_on and self._rvc_auto_var.get()
-                and self._rvc_auto_scope.get() == "global"):
+        # If Auto-RVC is on and scope=global, resolve safely on main thread before launching thread
+        if rvc_on and auto_rvc and auto_scope == "global":
             self._apply_global_auto_rvc()
 
-        total_batches = len(batches)
+        rvc_m_name = self._rvc_model_var.get()
+        rvc_index_path = ""
+        if rvc_on and rvc_m_name:
+            m_path = os.path.join("rvc_models", rvc_m_name)
+            m_dir = os.path.dirname(m_path)
+            model_stem = os.path.splitext(os.path.basename(m_path))[0]
+            index_candidates = glob.glob(os.path.join(m_dir, "*.index"))
+            cand = next((p for p in index_candidates if model_stem in os.path.basename(p)), 
+                        index_candidates[0] if index_candidates else None)
+            if cand and os.path.isfile(cand):
+                rvc_index_path = cand
+
+        rvc_params = RvcParameters(
+            enabled=rvc_on,
+            model_path=rvc_m_name,
+            index_path=rvc_index_path,
+            pitch=int(self._rvc_pitch_var.get()),
+            f0_method=str(self._rvc_method_var.get()),
+            index_rate=float(self._rvc_index_var.get()),
+            auto_rvc=auto_rvc,
+            auto_scope=auto_scope,
+        )
+
+        skyrim_mode = bool(self._skyrim_enabled.get())
+        skyrim_paths = {
+            "plugin": str(self._skyrim_plugin.get()).strip(),
+            "voice_type": str(self._skyrim_voice_type.get()).strip(),
+            "facefx": str(self._skyrim_facefx_path.get()),
+            "xwma": str(self._skyrim_xwma_path.get()),
+            "fonix": str(self._skyrim_fonix_path.get()),
+        }
+
+        context = GenerationContext(
+            output_dir=out_dir,
+            batches=batches,
+            engine_params=engine_params,
+            rvc_params=rvc_params,
+            skyrim_mode=skyrim_mode,
+            skyrim_paths=skyrim_paths,
+        )
+
+        total_jobs = sum(len(b) for b in batches)
+        self._gen_progress["maximum"] = total_jobs
+        self._gen_progress["value"]   = 0
+
+        self._stop_generation.clear()
+        self._skip_job_event.clear()
+        self._skip_batch_event.clear()
+        self._stop_batch_event.clear()
+        
+        self._gen_btn.config(state="disabled")
+        self._stop_btn.config(state="normal")
+        self._skip_batch_btn.config(state="normal")
+        self._stop_batch_btn.config(state="normal")
+
+        threading.Thread(target=self._run_generation,
+                         args=(context,), daemon=True).start()
+
+    def _run_generation(self, context: GenerationContext):
+        import re
+        backend = context.engine_params.backend
+        worker  = {"xtts": self._xtts_worker,
+                   "qwen": self._qwen_worker,
+                   "chatterbox": self._chatterbox_worker}[backend]
+
+        total_jobs = sum(len(b) for b in context.batches)
+        processed_count = 0
+
+        profile_path = context.engine_params.profile_path
+        valid_wavs = context.engine_params.ref_wavs
+
+        speed = context.engine_params.speed
+        temp = context.engine_params.temperature
+        rep = context.engine_params.repetition_penalty
+        top_k = context.engine_params.top_k
+        top_p = context.engine_params.top_p
+        active_presets = (
+            QWEN_PRESETS if backend == "qwen"
+            else CHATTERBOX_PRESETS if backend == "chatterbox"
+            else XTTS_PRESETS
+        )
+
+        lang = context.engine_params.language
+        global_preset = context.engine_params.global_preset
+        use_icl = context.engine_params.use_icl
+
+        rvc_on = context.rvc_params.enabled
+        xtts_pro = context.engine_params.xtts_audio_pro
+        out_dir = context.output_dir
+
+        total_batches = len(context.batches)
         
         # Outer Batch Loop
-        for b_idx, batch in enumerate(batches, 1):
+        for b_idx, batch in enumerate(context.batches, 1):
             if self._stop_generation.is_set(): break
             
             self._log(f"--- Processing Batch {b_idx}/{total_batches} ({len(batch)} jobs) ---", WARNING)
@@ -3181,34 +3274,41 @@ class VoiceClonerApp(tk.Tk):
             self._stop_batch_event.clear()
 
             # Inner Job Loop
-            for idx, text, status_lbl, job_mood, custom_filename in batch:
+            for job in batch:
+                idx = job.index
+                text = job.text
+                status_lbl = job.status_label_id
+                job_mood = job.job_mood
+                custom_filename = job.custom_filename
+                play_btn = job.play_button_id
+
                 processed_count += 1
                 self._skip_job_event.clear()
                 
                 # 1. Batch-level Interrupts
                 if self._stop_generation.is_set():
-                    self.after(0, lambda s=status_lbl: s.config(text="○", fg=TEXT_MUT))
+                    if status_lbl: self.after(0, lambda s=status_lbl: s.config(text="○", fg=TEXT_MUT))
                     break
                 if self._skip_batch_event.is_set():
-                    self.after(0, lambda s=status_lbl: s.config(text="⏭", fg=TEXT_MUT))
+                    if status_lbl: self.after(0, lambda s=status_lbl: s.config(text="⏭", fg=TEXT_MUT))
                     continue
                 if self._stop_batch_event.is_set():
-                    self.after(0, lambda s=status_lbl: s.config(text="○", fg=TEXT_MUT))
+                    if status_lbl: self.after(0, lambda s=status_lbl: s.config(text="○", fg=TEXT_MUT))
                     break
                     
                 # 2. Job-level skip
                 if self._skip_job_event.is_set():
                     self._log(f"  Skipping Job {processed_count}...", WARNING)
-                    self.after(0, lambda s=status_lbl: s.config(text="⏭", fg=TEXT_MUT))
+                    if status_lbl: self.after(0, lambda s=status_lbl: s.config(text="⏭", fg=TEXT_MUT))
                     continue
 
                 j_pname = job_mood if job_mood != "[Auto]" else global_preset
 
                 # Extract per-job params based on backend
                 if backend == "chatterbox":
-                    j_exagg = self._chatterbox_exagg_var.get()
-                    j_cfg   = self._chatterbox_cfg_var.get()
-                    j_temp  = self._chatterbox_temp_var.get()
+                    j_exagg = context.engine_params.exaggeration
+                    j_cfg   = context.engine_params.cfg_weight
+                    j_temp  = temp
                     if j_pname in CHATTERBOX_PRESETS:
                         p = CHATTERBOX_PRESETS[j_pname]
                         j_exagg, j_cfg, j_temp = p[0], p[1], p[2]
@@ -3220,7 +3320,7 @@ class VoiceClonerApp(tk.Tk):
                         p = active_presets[j_pname]
                         j_temp2, j_speed, j_rep, j_top_k, j_top_p = p[0], p[1], p[2], p[3], p[4]
 
-                self.after(0, lambda s=status_lbl: s.config(text="◌", fg=WARNING))
+                if status_lbl: self.after(0, lambda s=status_lbl: s.config(text="◌", fg=WARNING))
                 self._set_status(f"job {processed_count}/{total_jobs}…", WARNING)
 
                 ts       = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -3231,14 +3331,14 @@ class VoiceClonerApp(tk.Tk):
                     if not base_name.lower().endswith(".wav"):
                         base_name += ".wav"
                     out = os.path.join(out_dir, base_name)
-                elif self._naming_mode.get() == "Sequential":
+                elif context.engine_params.naming_mode == "Sequential":
                     out = os.path.join(out_dir, f"{idx:02d}.wav")
                 else:
                     clean    = re.sub(r'[^a-zA-Z0-9]', '_', text[:20].strip())
                     out      = os.path.join(out_dir, f"{pfx}{idx:02d}_{clean}_{ts[-6:]}.wav")
                     
                 send_text = text
-                if backend == "qwen" and self._qwen_emotion_tags.get():
+                if backend == "qwen" and context.engine_params.emotion_tags:
                     if use_icl:
                         self._log(f"  [Qwen tags] skipped — ICL mode active", TEXT_MUT)
                     else:
@@ -3247,17 +3347,17 @@ class VoiceClonerApp(tk.Tk):
                 preview  = f'"{text[:50]}…"' if len(text) > 50 else f'"{text}"'
                 self._log(f"[{backend.upper()}] B{b_idx} | Job {processed_count}: {preview}", ACCENT)
 
-                _auto_rvc_on    = rvc_on and self._rvc_auto_var.get()
-                _auto_rvc_scope = self._rvc_auto_scope.get()
+                _auto_rvc_on    = rvc_on and context.rvc_params.auto_rvc
+                _auto_rvc_scope = context.rvc_params.auto_scope
 
                 # Feature 4: streaming chunk handler for Qwen
-                if backend == "qwen" and self._qwen_stream.get():
+                if backend == "qwen" and context.engine_params.stream:
                     import queue as _q
                     _chunk_queue = _q.Queue()
                     _stream_active = [True]
                     def _on_chunk(path):
                         _chunk_queue.put(path)
-                        self.after(0, lambda: status_lbl.config(text="▶", fg=ACCENT))
+                        if status_lbl: self.after(0, lambda: status_lbl.config(text="▶", fg=ACCENT))
                     def _drain_chunks():
                         if not _stream_active[0]: return
                         if self._pygame_ok:
@@ -3268,12 +3368,8 @@ class VoiceClonerApp(tk.Tk):
                                     pygame.mixer.music.load(path)
                                     pygame.mixer.music.play()
                             except _q.Empty:
-                                # Expected/normal: no chunk ready yet this poll.
                                 pass
                             except Exception:
-                                # Playback errors (e.g. a chunk file that got
-                                # cleaned up mid-stream) shouldn't kill the
-                                # polling loop -- just skip this tick.
                                 pass
                         if _stream_active[0]: self.after(150, _drain_chunks)
                     self._qwen_worker._on_chunk = _on_chunk
@@ -3299,14 +3395,14 @@ class VoiceClonerApp(tk.Tk):
                     # Chatterbox-specific
                     "exaggeration":  j_exagg,
                     "cfg_weight":    j_cfg,
-                    "max_steps":     self._chatterbox_steps_var.get() if backend == "chatterbox" else 40,
+                    "max_steps":     context.engine_params.max_steps if backend == "chatterbox" else 40,
                     "post_process":  xtts_pro if (backend == "xtts" and not rvc_on) else
-                                     (self._xtts_audio_pro.get() if backend == "chatterbox" else False),
-                    "stream":        backend == "qwen" and self._qwen_stream.get(),
+                                     (xtts_pro if backend == "chatterbox" else False),
+                    "stream":        backend == "qwen" and context.engine_params.stream,
                 }
                 
                 # Feature 3: retry on mumble (Qwen only)
-                _max_tries = 3 if (backend == "qwen" and self._qwen_retry_mumble.get()) else 1
+                _max_tries = 3 if (backend == "qwen" and context.engine_params.retry_mumble) else 1
                 resp = None
                 for _attempt in range(_max_tries):
                     if _attempt > 0:
@@ -3325,14 +3421,14 @@ class VoiceClonerApp(tk.Tk):
                             break
                     
                     if resp.get("status") != "done": break
-                    if not (backend == "qwen" and self._qwen_retry_mumble.get()): break
+                    if not (backend == "qwen" and context.engine_params.retry_mumble): break
                     if not self._is_mumbled(resp.get("file", "")): break
                 
                 if resp is None: resp = {"status": "error", "message": "no response"}
                 _stream_active[0] = False
                 
                 if self._stop_generation.is_set():
-                    self.after(0, lambda s=status_lbl: s.config(text="○", fg=TEXT_MUT))
+                    if status_lbl: self.after(0, lambda s=status_lbl: s.config(text="○", fg=TEXT_MUT))
                     break
 
                 if resp.get("status") == "done":
@@ -3340,20 +3436,22 @@ class VoiceClonerApp(tk.Tk):
                     
                     # RVC
                     if rvc_on:
-                        m_name = self._rvc_model_var.get()
+                        m_name = context.rvc_params.model_path
                         if m_name:
                             self._set_status(f"RVC {processed_count}…", ACCENT3)
                             m_path = os.path.join("rvc_models", m_name)
-                            m_dir = os.path.dirname(m_path)
-                            model_stem = os.path.splitext(os.path.basename(m_path))[0]
-                            index_candidates = glob.glob(os.path.join(m_dir, "*.index"))
-                            i_path = next((p for p in index_candidates if model_stem in os.path.basename(p)), 
-                                          index_candidates[0] if index_candidates else None)
+                            i_path = context.rvc_params.index_path or None
+                            if not i_path:
+                                m_dir = os.path.dirname(m_path)
+                                model_stem = os.path.splitext(os.path.basename(m_path))[0]
+                                index_candidates = glob.glob(os.path.join(m_dir, "*.index"))
+                                i_path = next((p for p in index_candidates if model_stem in os.path.basename(p)), 
+                                              index_candidates[0] if index_candidates else None)
                             
                             if _auto_rvc_on and _auto_rvc_scope == "per-job":
                                 _p, _ir, _fm, _pn, _em, _it = self._auto_rvc_preset_for(text)
                             else:
-                                _p, _ir, _fm = self._rvc_pitch_var.get(), self._rvc_index_var.get(), self._rvc_method_var.get()
+                                _p, _ir, _fm = context.rvc_params.pitch, context.rvc_params.index_rate, context.rvc_params.f0_method
                             
                             rvc_cmd = {
                                 "action": "infer", "input": final_f, "out": final_f.replace(".wav", "_rvc.wav"),
@@ -3377,12 +3475,14 @@ class VoiceClonerApp(tk.Tk):
                                 self._log(f"  → RVC applied ({_p:+d})", ACCENT3)
                     
                     # Skyrim
-                    if self._skyrim_enabled.get():
+                    if context.skyrim_mode:
                         self._set_status(f"Skyrim FUZ {processed_count}…", WARNING)
                         try:
-                            conv = SkyrimConverter(facefx_path=self._skyrim_facefx_path.get(), 
-                                                  xwma_path=self._skyrim_xwma_path.get(), fonix_path=self._skyrim_fonix_path.get())
-                            plugin, vtype = self._skyrim_plugin.get().strip(), self._skyrim_voice_type.get().strip()
+                            sp = context.skyrim_paths
+                            conv = SkyrimConverter(facefx_path=sp.get("facefx", ""), 
+                                                  xwma_path=sp.get("xwma", ""), fonix_path=sp.get("fonix", ""))
+                            plugin = sp.get("plugin", "").strip()
+                            vtype = sp.get("voice_type", "").strip()
                             formid = os.path.splitext(os.path.basename(custom_filename))[0] if custom_filename else f"{idx:02d}_{re.sub(r'[^a-zA-Z0-9]', '_', text[:30].strip())}"
                             skybin = os.path.join("output", "Skyrim_Export", "sound", "voice", plugin, vtype)
                             os.makedirs(skybin, exist_ok=True)
@@ -3393,14 +3493,13 @@ class VoiceClonerApp(tk.Tk):
                     self._log(f"  → {os.path.basename(final_f)} ({resp.get('duration',0):.1f}s)", ACCENT2)
                     self._job_output_files[idx] = final_f
                     # Enable play button
-                    _pb = next((pb for v,s,_,__,pb,sk,sp in self._job_entries if s is status_lbl), None)
-                    if _pb: self.after(0, lambda b=_pb: b.config(state="normal"))
-                    self.after(0, lambda s=status_lbl: s.config(text="●", fg=ACCENT2))
+                    if play_btn: self.after(0, lambda b=play_btn: b.config(state="normal"))
+                    if status_lbl: self.after(0, lambda s=status_lbl: s.config(text="●", fg=ACCENT2))
                 else:
                     self._log(f"  Job {processed_count} failed: {resp.get('message')}", DANGER)
-                    self.after(0, lambda s=status_lbl: s.config(text="✕", fg=DANGER))
+                    if status_lbl: self.after(0, lambda s=status_lbl: s.config(text="✕", fg=DANGER))
 
-                self._gen_progress["value"] = processed_count
+                self.after(0, lambda v=processed_count: self._gen_progress.configure(value=v))
 
         self.after(0, lambda: self._gen_btn.config(state="normal"))
         self.after(0, lambda: self._stop_btn.config(state="disabled"))

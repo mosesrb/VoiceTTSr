@@ -3,30 +3,8 @@ import json
 import tempfile
 import pytest
 
-
-def save_config_atomic(filepath, data):
-    """Save config atomically with temp file rename."""
-    tmp = filepath + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-    if os.path.exists(filepath):
-        os.remove(filepath)
-    os.rename(tmp, filepath)
-
-
-def load_config_safe(filepath, defaults):
-    """Load config safely with fallback defaults."""
-    if not os.path.isfile(filepath):
-        return dict(defaults)
-    try:
-        with open(filepath, "r", encoding="utf-8") as f:
-            loaded = json.load(f)
-            # Merge with defaults
-            merged = dict(defaults)
-            merged.update(loaded)
-            return merged
-    except Exception:
-        return dict(defaults)
+from core.config import save_config_atomic, load_config_safe
+from core import save_config_atomic as save_atomic_pkg, load_config_safe as load_safe_pkg
 
 
 class TestConfigPersistence:
@@ -40,6 +18,10 @@ class TestConfigPersistence:
             "out_folder": "Output",
             "active_preset": "Natural"
         }
+
+    def test_package_exports(self):
+        assert save_config_atomic is save_atomic_pkg
+        assert load_config_safe is load_safe_pkg
 
     def test_safe_load_nonexistent(self, defaults):
         loaded = load_config_safe("non_existent_config.json", defaults)
@@ -66,5 +48,22 @@ class TestConfigPersistence:
             with open(cfg_path, "w", encoding="utf-8") as f:
                 f.write("{ INVALID JSON DATA ...")
 
+            loaded = load_config_safe(cfg_path, defaults)
+            assert loaded == defaults
+
+    def test_non_dict_json_fallback(self, defaults):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cfg_path = os.path.join(tmpdir, "array.json")
+            with open(cfg_path, "w", encoding="utf-8") as f:
+                json.dump(["not", "a", "dict"], f)
+
+            loaded = load_config_safe(cfg_path, defaults)
+            assert loaded == defaults
+
+    def test_atomic_save_nested_directory_creation(self, defaults):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cfg_path = os.path.join(tmpdir, "nested", "subfolder", "config.json")
+            save_config_atomic(cfg_path, defaults)
+            assert os.path.exists(cfg_path)
             loaded = load_config_safe(cfg_path, defaults)
             assert loaded == defaults
