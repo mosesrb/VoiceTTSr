@@ -38,6 +38,68 @@ def log(text, level="info"):
 
 
 # ══════════════════════════════════════════════════════════════════════════
+# SECURE DESERIALIZATION GUARD (P0 Blocker Remediation: VT-SEC-1 / SEC-01)
+# Enforce weights_only=True globally to prevent arbitrary code execution
+# from malicious .pth model checkpoints across worker and rvc_python.
+# ══════════════════════════════════════════════════════════════════════════
+_orig_torch_load = getattr(torch, "load")
+
+def _secure_torch_load(*args, **kwargs):
+    if "weights_only" not in kwargs:
+        kwargs["weights_only"] = True
+    return _orig_torch_load(*args, **kwargs)
+
+setattr(torch, "load", _secure_torch_load)
+
+# Register fairseq Dictionary in safe globals if supported so that
+# weights_only=True can safely load Hubert checkpoints without unconstrained unpickling
+try:
+    if hasattr(torch.serialization, "add_safe_globals"):
+        try:
+            from fairseq.data.dictionary import Dictionary
+            torch.serialization.add_safe_globals([Dictionary])
+        except ImportError:
+            if "fairseq.data.dictionary" not in sys.modules:
+                fs = sys.modules.get("fairseq") or types.ModuleType("fairseq")
+                fs_data = types.ModuleType("fairseq.data")
+                fs_dict = types.ModuleType("fairseq.data.dictionary")
+                class Dictionary: pass
+                Dictionary.__module__ = "fairseq.data.dictionary"
+                Dictionary.__name__ = "Dictionary"
+                fs_dict.Dictionary = Dictionary
+                fs_data.dictionary = fs_dict
+                fs.data = fs_data
+                sys.modules["fairseq"] = fs
+                sys.modules["fairseq.data"] = fs_data
+                sys.modules["fairseq.data.dictionary"] = fs_dict
+            torch.serialization.add_safe_globals([sys.modules["fairseq.data.dictionary"].Dictionary])
+except Exception:
+    pass
+
+
+def verify_rvc_checkpoint(model_pth: str) -> dict:
+    """
+    Validates that user-supplied RVC model file is a safe PyTorch checkpoint.
+    Strictly enforces weights_only=True deserialization to block arbitrary code execution.
+    Raises ValueError with actionable security message if checkpoint is malicious or corrupted.
+    """
+    if not os.path.isfile(model_pth):
+        raise FileNotFoundError(f"Model checkpoint not found: {model_pth}")
+    try:
+        cpt = torch.load(model_pth, map_location="cpu", weights_only=True)
+        if not isinstance(cpt, dict):
+            raise ValueError("RVC model checkpoint root must be a dictionary.")
+        return cpt
+    except Exception as e:
+        raise ValueError(
+            f"Security rejection: RVC model checkpoint '{os.path.basename(model_pth)}' failed safe tensor verification ({e}). "
+            "To prevent arbitrary code execution, unconstrained unpickling is blocked. "
+            "Please provide a valid, safe PyTorch weights file."
+        ) from e
+
+
+
+# ══════════════════════════════════════════════════════════════════════════
 # FAIRSEQ DETECTION
 # ══════════════════════════════════════════════════════════════════════════
 def _fairseq_available():
@@ -95,22 +157,39 @@ class _FairsegHubertDirect(nn.Module):
         self.device = torch.device(device)
 
         log("Loading fairseq Hubert checkpoint weights…")
-        # Deliberately NOT forcing weights_only=False here. hubert_base.pt's
-        # pickle stream references fairseq.data.dictionary.Dictionary, which
-        # isn't in PyTorch's default safe-globals list, so on PyTorch >=2.6
-        # this will raise a clear "Unsupported global" error rather than
-        # silently deserializing an unreviewed third-party class -- that's
-        # the correct, safer failure mode for a downloaded checkpoint we
-        # can't fully verify from this codebase alone. The actual integrity
-        # control for this specific file is the SHA-256 check now performed
-        # in download_resources.py before it ever reaches this loader.
-        # If you hit "Unsupported global: GLOBAL fairseq.data.dictionary.
-        # Dictionary" and have confirmed the file's hash matches the pinned
-        # value in download_resources.py, you can allowlist it narrowly:
-        #   from fairseq.data.dictionary import Dictionary
-        #   torch.serialization.add_safe_globals([Dictionary])
-        # Do not reach for weights_only=False as a first response.
-        ckpt = torch.load(ckpt_path, map_location="cpu")
+        # Allowlist fairseq.data.dictionary.Dictionary under safe_globals so that
+        # weights_only=True can load the Hubert checkpoint securely on PyTorch >= 2.4/2.6
+        # without allowing any arbitrary executable code or hostile globals.
+        try:
+            from fairseq.data.dictionary import Dictionary
+            if hasattr(torch.serialization, "add_safe_globals"):
+                torch.serialization.add_safe_globals([Dictionary])
+        except Exception:
+            pass
+
+        try:
+            ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=True)
+        except Exception as e:
+            if "fairseq.data.dictionary.Dictionary" in str(e) and hasattr(torch.serialization, "add_safe_globals"):
+                if "fairseq.data.dictionary" not in sys.modules:
+                    fs = sys.modules.get("fairseq") or types.ModuleType("fairseq")
+                    fs_data = types.ModuleType("fairseq.data")
+                    fs_dict = types.ModuleType("fairseq.data.dictionary")
+                    class Dictionary: pass
+                    Dictionary.__module__ = "fairseq.data.dictionary"
+                    fs_dict.Dictionary = Dictionary
+                    fs_data.dictionary = fs_dict
+                    fs.data = fs_data
+                    sys.modules["fairseq"] = fs
+                    sys.modules["fairseq.data"] = fs_data
+                    sys.modules["fairseq.data.dictionary"] = fs_dict
+                    torch.serialization.add_safe_globals([Dictionary])
+                ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=True)
+            else:
+                raise ValueError(
+                    f"Security rejection: Hubert checkpoint '{os.path.basename(ckpt_path)}' failed safe tensor verification ({e}). "
+                    "Unconstrained unpickling is blocked to prevent arbitrary code execution."
+                ) from e
 
         # fairseq saves model state under different keys depending on version
         if "model" in ckpt:
@@ -271,6 +350,8 @@ class RvcEngine:
         # rvc_python.infer, which is the only submodule used here.
         from rvc_python.infer import RVCInference
         if self._rvc is None or self._loaded_model != model_pth:
+            # Pre-validate checkpoint integrity and safe weights deserialization
+            verify_rvc_checkpoint(model_pth)
             self._rvc = RVCInference(device=self.device)
             log(f"Loading model: {os.path.basename(model_pth)}…")
             # Pass index_path into load_model — this is the correct API
